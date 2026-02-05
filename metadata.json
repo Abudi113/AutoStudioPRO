@@ -1,0 +1,8 @@
+{
+  "name": "AutoStudio Pro AI",
+  "description": "The most advanced AI photo solution for car dealerships. Professional studio-grade automotive photos with perfect car preservation and guided capture.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
