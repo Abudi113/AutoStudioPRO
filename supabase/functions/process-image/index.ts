@@ -4,7 +4,7 @@
 import { GoogleGenAI } from "npm:@google/genai@^1.38.0";
 
 const corsHeaders = {
-    "Access-Control-Allow-Origin": "*", // Update this to your Netlify domain in production
+    "Access-Control-Allow-Origin": "https://carveoo.netlify.app",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
