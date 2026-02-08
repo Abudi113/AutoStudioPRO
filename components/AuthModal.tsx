@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Mail, CheckCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 
 interface AuthModalProps {
     isOpen: boolean;
@@ -14,14 +15,19 @@ interface AuthModalProps {
 const AuthModal: React.FC<AuthModalProps> = ({
     isOpen,
     onClose,
-    title = "Save Your Work",
-    description = "Create a free account to download your high-quality studio photos."
+    title,
+    description
 }) => {
+    const { t } = useLanguage();
     const { signIn } = useAuth();
     const [email, setEmail] = useState('');
     const [loading, setLoading] = useState(false);
     const [sent, setSent] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // Use props if provided, otherwise use translations
+    const displayTitle = title || t('authTitle');
+    const displayDesc = description || t('authDesc');
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -72,23 +78,23 @@ const AuthModal: React.FC<AuthModalProps> = ({
                                     <div className="w-12 h-12 bg-blue-600/20 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500">
                                         <Mail className="w-6 h-6" />
                                     </div>
-                                    <h2 className="text-2xl font-bold text-white mb-2">{title}</h2>
-                                    <p className="text-gray-400">{description}</p>
+                                    <h2 className="text-2xl font-bold text-white mb-2">{displayTitle}</h2>
+                                    <p className="text-gray-400">{displayDesc}</p>
                                     <div className="mt-4 inline-flex items-center gap-2 px-3 py-1 bg-green-500/10 border border-green-500/20 rounded-full text-green-400 text-xs font-bold">
-                                        <CheckCircle className="w-3 h-3" /> Includes 5 Free Credits
+                                        <CheckCircle className="w-3 h-3" /> {t('includesFreeCredits')}
                                     </div>
                                 </div>
 
                                 <form onSubmit={handleSubmit} className="space-y-4">
                                     <div>
-                                        <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1">Email Address</label>
+                                        <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1">{t('labelEmail')}</label>
                                         <input
                                             type="email"
                                             id="email"
                                             required
                                             value={email}
                                             onChange={(e) => setEmail(e.target.value)}
-                                            placeholder="you@example.com"
+                                            placeholder={t('emailPlaceholder')}
                                             className="w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
                                         />
                                     </div>
@@ -104,7 +110,7 @@ const AuthModal: React.FC<AuthModalProps> = ({
                                         disabled={loading}
                                         className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                     >
-                                        {loading ? 'Sending Link...' : <>Continue with Email <ArrowRight className="w-4 h-4" /></>}
+                                        {loading ? t('sendingLink') : <>{t('continueEmail')} <ArrowRight className="w-4 h-4" /></>}
                                     </button>
                                 </form>
                                 <p className="mt-6 text-center text-xs text-gray-500">
@@ -116,15 +122,15 @@ const AuthModal: React.FC<AuthModalProps> = ({
                                 <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-6 text-green-500 animate-pulse">
                                     <CheckCircle className="w-8 h-8" />
                                 </div>
-                                <h2 className="text-2xl font-bold text-white mb-4">Check your inbox!</h2>
+                                <h2 className="text-2xl font-bold text-white mb-4">{t('checkInbox')}</h2>
                                 <p className="text-gray-400 mb-8">
-                                    We've sent a magic login link to <span className="text-white font-medium">{email}</span>. Click it to confirm your account and get your credits.
+                                    {t('magicLinkSent')} <span className="text-white font-medium">{email}</span>. Click it to confirm your account and get your credits.
                                 </p>
                                 <button
                                     onClick={onClose}
                                     className="w-full py-3 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl transition-colors border border-white/10"
                                 >
-                                    Close Window
+                                    {t('closeWindow')}
                                 </button>
                             </div>
                         )}

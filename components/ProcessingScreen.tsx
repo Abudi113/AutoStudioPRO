@@ -14,54 +14,73 @@ interface ProcessingScreenProps {
 
 const ProcessingScreen: React.FC<ProcessingScreenProps> = ({ order, studio, onJobProcessed, onComplete, t, theme }) => {
   const [processedCount, setProcessedCount] = useState(0);
-  const [logs, setLogs] = useState<string[]>(["Initializing neural engine...", "System Check: Photo Detection logic online."]);
+  const [logs, setLogs] = useState<string[]>([]);
   const processingStarted = useRef(false);
 
+  // Helper for simple interpolation
+  const format = (str: string, params: Record<string, string | number>) => {
+    let result = str;
+    for (const key in params) {
+      result = result.replace(`{${key}}`, String(params[key]));
+    }
+    return result;
+  };
+
   useEffect(() => {
+    // Initialize logs with translation
+    if (logs.length === 0) {
+      setLogs([t.initializing, t.systemCheck]);
+    }
+
     if (processingStarted.current) return;
     processingStarted.current = true;
 
     const processAll = async () => {
-      setLogs(prev => [...prev, `Task: ${order.taskType.toUpperCase()} processing initiated.`, `Batch: ${order.jobs.length} assets queued.`]);
+      setLogs(prev => [...prev,
+      format(t.taskInitiated, { task: order.taskType.toUpperCase() }),
+      format(t.batchQueued, { count: order.jobs.length })
+      ]);
 
       if (order.branding?.isEnabled && order.branding?.logoUrl) {
-        setLogs(prev => [...prev, "Brand Identity: Logo detected. Preparing for studio wall & plate branding."]);
+        setLogs(prev => [...prev, t.brandDetected]);
       }
 
       let count = 0;
       for (const job of order.jobs) {
-        setLogs(prev => [...prev, `[AI Vision] Analyzing ${job.angle.replace(/_/g, ' ')}...`]);
+        const angleLabel = t[job.angle] || job.angle.replace(/_/g, ' ');
+        setLogs(prev => [...prev, format(t.analyzingInfo, { angle: angleLabel })]);
 
         try {
           await new Promise(r => setTimeout(r, 600));
 
           if (order.taskType === 'interior' || job.angle === 'interior') {
-            setLogs(prev => [...prev, `[Processing] Applying Luxury Interior HDR, Reflection Removal & Cabin Cleaning...`]);
+            setLogs(prev => [...prev, t.processingInterior]);
           } else {
-            setLogs(prev => [...prev, `[Processing] Executing Studio Compositing${order.branding?.isEnabled ? ' with Branding' : ''}...`]);
+            const brandingText = order.branding?.isEnabled ? t.withBranding : '';
+            setLogs(prev => [...prev, format(t.processingStudio, { branded: brandingText })]);
           }
 
           const result = await processCarImage(job.originalImage, studio.id, job.angle, order.taskType, order.branding);
           onJobProcessed(job.id, result, 'completed');
 
-          setLogs(prev => [...prev, `[SUCCESS] ${job.angle.replace(/_/g, ' ')} enhanced and optimized.`]);
+          setLogs(prev => [...prev, format(t.successEnhanced, { angle: angleLabel })]);
         } catch (e) {
           console.error(`AI Error for job ${job.id}:`, e);
           onJobProcessed(job.id, undefined, 'failed');
-          setLogs(prev => [...prev, `[ERROR] Failed to process ${job.angle.replace(/_/g, ' ')}.`]);
+          setLogs(prev => [...prev, format(t.errorFailed, { angle: angleLabel })]);
         }
 
         count++;
         setProcessedCount(count);
       }
 
-      setLogs(prev => [...prev, "Batch verification successful.", "All dealership assets ready.", "Redirecting..."]);
+      setLogs(prev => [...prev, t.batchVerification, t.assetsReady, t.redirecting]);
 
       setTimeout(onComplete, 2000);
     };
 
     processAll();
-  }, [order.id, onComplete, onJobProcessed, studio.name, order.taskType, order.branding]);
+  }, [order.id, onComplete, onJobProcessed, studio.name, order.taskType, order.branding, t]);
 
   const progress = (processedCount / order.jobs.length) * 100;
   const accentColor = theme === 'light' ? 'text-gold-dark' : 'text-blue-500';

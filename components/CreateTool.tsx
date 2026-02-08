@@ -23,7 +23,7 @@ const CreateTool: React.FC = () => {
     const { deductCredit, totalCredits } = useCredits();
     const { theme } = useTheme();
     const { language } = useLanguage();
-    const t = translations[language];
+    const t = translations[language] || translations['en'];
 
     const [view, setView] = useState<ViewState>('dashboard');
     const [orders, setOrders] = useState<Order[]>([]);

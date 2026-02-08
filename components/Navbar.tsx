@@ -1,13 +1,12 @@
-
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, User, Camera, LayoutDashboard, CreditCard, Sun, Moon, Globe, ChevronDown } from 'lucide-react';
+import { Camera, Sun, Moon, LogOut, User, Menu, X, Globe, CreditCard, LayoutDashboard } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCredits } from '../context/CreditsContext';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
-import VaultModal from './VaultModal';
 import AuthModal from './AuthModal';
+import VaultModal from './VaultModal';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Navbar: React.FC = () => {
@@ -25,22 +24,13 @@ const Navbar: React.FC = () => {
 
     const navLinks = [
         { name: t('home'), path: '/' },
-        { name: 'Pricing', path: '/pricing' },
-        { name: 'Contact', path: '/contact' },
+        { name: t('pricing'), path: '/pricing' },
+        { name: t('contact'), path: '/contact' },
     ];
 
     const languages = [
         { code: 'en', name: 'English', flag: '🇺🇸' },
         { code: 'de', name: 'Deutsch', flag: '🇩🇪' },
-        { code: 'zh', name: '中文', flag: '🇨🇳' },
-        { code: 'ar', name: 'العربية', flag: '🇦🇪' },
-        { code: 'fr', name: 'Français', flag: '🇫🇷' },
-        { code: 'es', name: 'Español', flag: '🇪🇸' },
-        { code: 'it', name: 'Italiano', flag: '🇮🇹' },
-        { code: 'ja', name: '日本語', flag: '🇯🇵' },
-        { code: 'ko', name: '한국어', flag: '🇰🇷' },
-        { code: 'pt', name: 'Português', flag: '🇵🇹' },
-        { code: 'ru', name: 'Русский', flag: '🇷🇺' },
     ];
 
     return (
@@ -59,8 +49,7 @@ const Navbar: React.FC = () => {
                             <Link
                                 key={link.name}
                                 to={link.path}
-                                className={`text-sm font-medium transition-colors hover:text-blue-500 ${isActive(link.path) ? 'text-blue-500' : 'opacity-70'
-                                    }`}
+                                className={`text-sm font-medium transition-colors hover:text-blue-500 ${isActive(link.path) ? 'text-blue-500' : 'opacity-70'}`}
                             >
                                 {link.name}
                             </Link>
@@ -86,7 +75,6 @@ const Navbar: React.FC = () => {
                             >
                                 <Globe className="w-5 h-5" />
                                 <span className="text-xs uppercase font-bold">{language}</span>
-                                <ChevronDown className={`w-3 h-3 transition-transform ${isLangOpen ? 'rotate-180' : ''}`} />
                             </button>
                             <AnimatePresence>
                                 {isLangOpen && (
@@ -103,8 +91,7 @@ const Navbar: React.FC = () => {
                                                     setLanguage(lang.code as any);
                                                     setIsLangOpen(false);
                                                 }}
-                                                className={`flex items-center gap-3 w-full px-4 py-2 text-sm text-left hover:bg-blue-500/10 transition-colors ${language === lang.code ? 'text-blue-500 font-bold' : ''
-                                                    }`}
+                                                className={`flex items-center gap-3 w-full px-4 py-2 text-sm text-left hover:bg-blue-500/10 transition-colors ${language === lang.code ? 'text-blue-500 font-bold' : ''}`}
                                             >
                                                 <span>{lang.flag}</span>
                                                 {lang.name}
@@ -119,7 +106,7 @@ const Navbar: React.FC = () => {
 
                         {user ? (
                             <>
-                                <Link to="/dashboard">
+                                <Link to="/create">
                                     <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors hover:text-blue-500">
                                         <LayoutDashboard className="w-4 h-4" />
                                         {t('dashboard')}
@@ -143,7 +130,7 @@ const Navbar: React.FC = () => {
                                                 onClick={() => signOut()}
                                                 className="block w-full text-left px-4 py-2 text-sm hover:bg-red-500/10 hover:text-red-500 transition-colors"
                                             >
-                                                Sign Out
+                                                {t('signOut')}
                                             </button>
                                         </div>
                                     </div>
@@ -155,13 +142,13 @@ const Navbar: React.FC = () => {
                                     onClick={() => setShowAuthModal(true)}
                                     className="text-sm font-medium hover:text-blue-500 transition-colors"
                                 >
-                                    Log In
+                                    {t('login')}
                                 </button>
                                 <Link
                                     to="/create"
                                     className="px-5 py-2 text-sm font-bold text-white bg-blue-600 rounded-full hover:bg-blue-700 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/20"
                                 >
-                                    {t('createFirst')}
+                                    {t('getStartedFree')}
                                 </Link>
                             </>
                         )}
@@ -200,8 +187,7 @@ const Navbar: React.FC = () => {
                                     key={link.name}
                                     to={link.path}
                                     onClick={() => setIsOpen(false)}
-                                    className={`block px-3 py-2 text-base font-medium rounded-xl hover:bg-blue-500/10 transition-colors ${isActive(link.path) ? 'text-blue-500 bg-blue-500/10' : ''
-                                        }`}
+                                    className={`block px-3 py-2 text-base font-medium rounded-xl hover:bg-blue-500/10 transition-colors ${isActive(link.path) ? 'text-blue-500 bg-blue-500/10' : ''}`}
                                 >
                                     {link.name}
                                 </Link>
@@ -226,22 +212,22 @@ const Navbar: React.FC = () => {
                                 {user ? (
                                     <>
                                         <Link
-                                            to="/dashboard"
+                                            to="/create"
                                             onClick={() => setIsOpen(false)}
                                             className="flex items-center gap-2 px-3 py-2 text-base font-medium opacity-70 hover:opacity-100 rounded-xl"
                                         >
                                             <LayoutDashboard className="w-5 h-5" />
-                                            Dashboard
+                                            {t('dashboard')}
                                         </Link>
                                         <div className="flex items-center justify-between px-3 py-2 bg-blue-500/10 rounded-xl">
-                                            <span className="text-sm font-medium">Credits</span>
+                                            <span className="text-sm font-medium">{t('credits')}</span>
                                             <span className="text-blue-500 font-bold">{totalCredits}</span>
                                         </div>
                                         <button
                                             onClick={() => { signOut(); setIsOpen(false); }}
                                             className="w-full text-left px-3 py-2 text-base font-medium text-red-500 hover:bg-red-500/10 rounded-xl"
                                         >
-                                            Sign Out
+                                            {t('signOut')}
                                         </button>
                                     </>
                                 ) : (
@@ -250,14 +236,14 @@ const Navbar: React.FC = () => {
                                             onClick={() => { setShowAuthModal(true); setIsOpen(false); }}
                                             className="w-full py-3 text-center text-sm font-bold border border-[var(--border)] rounded-full hover:bg-gray-500/5 transition-colors"
                                         >
-                                            Log In
+                                            {t('login')}
                                         </button>
                                         <Link
                                             to="/create"
                                             onClick={() => setIsOpen(false)}
                                             className="w-full py-3 text-center text-sm font-bold text-white bg-blue-600 rounded-full hover:bg-blue-700 transition-colors"
                                         >
-                                            Get Started
+                                            {t('getStartedFree')}
                                         </Link>
                                     </div>
                                 )}
@@ -266,22 +252,20 @@ const Navbar: React.FC = () => {
                     </motion.div>
                 )}
             </AnimatePresence>
-            {
-                showVault && (
-                    <VaultModal isOpen={showVault} onClose={() => setShowVault(false)} />
-                )
-            }
-            {
-                showAuthModal && (
-                    <AuthModal
-                        isOpen={showAuthModal}
-                        onClose={() => setShowAuthModal(false)}
-                        title="Welcome Back"
-                        description="Enter your email to sign in or create an account."
-                    />
-                )
-            }
-        </nav >
+
+            {showVault && (
+                <VaultModal isOpen={showVault} onClose={() => setShowVault(false)} />
+            )}
+
+            {showAuthModal && (
+                <AuthModal
+                    isOpen={showAuthModal}
+                    onClose={() => setShowAuthModal(false)}
+                    title={t('authTitle')}
+                    description={t('authDesc')}
+                />
+            )}
+        </nav>
     );
 };
 

@@ -12,7 +12,11 @@ export type CameraAngle =
   | 'detail'
   | 'door_open'
   | 'trunk_open'
-  | 'hood_open';
+  | 'hood_open'
+  | 'EXTERIOR_CAR'
+  | 'INTERIOR_CAR'
+  | 'DETAIL_CAR'
+  | 'OTHER';
 
 export interface StudioTemplate {
   id: string;

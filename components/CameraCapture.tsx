@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { CAMERA_ANGLES } from '../constants';
 import { CameraAngle } from '../types';
+import { useLanguage } from '../context/LanguageContext';
 
 interface CameraCaptureProps {
   onComplete: (images: { angle: CameraAngle; data: string }[]) => void;
@@ -10,6 +11,7 @@ interface CameraCaptureProps {
 }
 
 const CameraCapture: React.FC<CameraCaptureProps> = ({ onComplete, onBack, theme }) => {
+  const { t } = useLanguage();
   const [currentStep, setCurrentStep] = useState(0);
   const [capturedImages, setCapturedImages] = useState<{ angle: CameraAngle; data: string }[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -110,8 +112,8 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onComplete, onBack, theme
           <i className="fa-solid fa-arrow-left"></i>
         </button>
         <div className="text-center">
-          <p className="text-xs font-bold uppercase tracking-widest text-blue-500 mb-1">Guided Assistant</p>
-          <h3 className="text-lg font-bold text-white">{activeAngle.label}</h3>
+          <p className="text-xs font-bold uppercase tracking-widest text-blue-500 mb-1">{t('guidedAssistant')}</p>
+          <h3 className="text-lg font-bold text-white">{t(activeAngle.label as any)}</h3>
         </div>
         <div className="w-10 flex justify-end">
           <button
@@ -164,7 +166,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onComplete, onBack, theme
         <div className="absolute top-24 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
           <div className="bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 flex items-center gap-2">
             <i className="fa-solid fa-circle-exclamation text-yellow-500 text-xs"></i>
-            <span className="text-xs font-medium text-white/90">Avoid reflections & harsh shadows</span>
+            <span className="text-xs font-medium text-white/90">{t('warnReflections')}</span>
           </div>
         </div>
 
@@ -174,7 +176,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onComplete, onBack, theme
             <div
               key={angle.id}
               className={`w-2 h-2 rounded-full transition-all ${idx === currentStep ? 'bg-blue-500 scale-150 shadow-[0_0_10px_rgba(59,130,246,0.8)]' :
-                  idx < currentStep ? 'bg-green-500' : 'bg-white/20'
+                idx < currentStep ? 'bg-green-500' : 'bg-white/20'
                 }`}
             />
           ))}
@@ -188,7 +190,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onComplete, onBack, theme
             <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-white/10 transition-colors">
               <i className="fa-solid fa-image text-white/60"></i>
             </div>
-            <span className="text-[10px] text-white/40 font-bold uppercase">Gallery</span>
+            <span className="text-[10px] text-white/40 font-bold uppercase">{t('gallery')}</span>
             <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} />
           </label>
         </div>
@@ -210,7 +212,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onComplete, onBack, theme
             <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
               <i className="fa-solid fa-forward"></i>
             </div>
-            <span className="text-[10px] font-bold uppercase">Skip</span>
+            <span className="text-[10px] font-bold uppercase">{t('skip')}</span>
           </button>
         </div>
       </div>

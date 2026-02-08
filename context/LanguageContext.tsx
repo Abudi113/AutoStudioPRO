@@ -23,7 +23,8 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }, [language]);
 
     const t = (key: keyof typeof translations['en']): string => {
-        return (translations[language] as any)[key] || (translations['en'] as any)[key] || key;
+        const langData = translations[language] || translations['en'];
+        return (langData as any)[key] || (translations['en'] as any)[key] || key;
     };
 
     return (

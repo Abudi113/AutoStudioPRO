@@ -21,6 +21,8 @@ const BatchExport: React.FC<BatchExportProps> = ({ order, onBack, t, theme, onDo
   const cardBg = theme === 'light' ? 'bg-white' : 'bg-[#141414]';
   const borderCol = theme === 'light' ? 'border-gray-200' : 'border-white/10';
 
+  const lang = translations.en === t ? 'en' : 'de';
+
   const handleExport = async () => {
     if (onDownloadAttempt && !(await onDownloadAttempt())) return;
 
@@ -49,11 +51,9 @@ const BatchExport: React.FC<BatchExportProps> = ({ order, onBack, t, theme, onDo
       URL.revokeObjectURL(url);
 
       setIsExporting(false);
-      alert(lang === 'de' ? 'Inventar-Paket wurde erstellt!' : 'Inventory Pro Package created!');
+      alert(t.inventoryCreated);
     }, 2000);
   };
-
-  const lang = translations.en === t ? 'en' : 'de';
 
   return (
     <div className="max-w-4xl mx-auto py-6 md:py-10 px-2">
@@ -63,7 +63,7 @@ const BatchExport: React.FC<BatchExportProps> = ({ order, onBack, t, theme, onDo
         </button>
         <div>
           <h2 className={`text-2xl md:text-3xl font-extrabold mb-1 ${textTitle}`}>{t.batchExport}</h2>
-          <p className="text-gray-500 text-sm">Create a master ZIP archive for dealership deployment.</p>
+          <p className="text-gray-500 text-sm">{t.createZip}</p>
         </div>
       </header>
 
@@ -111,15 +111,15 @@ const BatchExport: React.FC<BatchExportProps> = ({ order, onBack, t, theme, onDo
             <h3 className={`text-lg font-bold mb-6 ${textTitle}`}>{t.summary}</h3>
             <div className="space-y-4 mb-10">
               <div className={`flex justify-between items-center py-3 border-b ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
-                <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">Package Format</span>
-                <span className={`text-sm font-extrabold ${textTitle}`}>COMPRESSED ZIP</span>
+                <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">{t.packageFormat}</span>
+                <span className={`text-sm font-extrabold ${textTitle}`}>{t.compressedZip}</span>
               </div>
               <div className={`flex justify-between items-center py-3 border-b ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
-                <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">Includes Manifest</span>
-                <span className="text-xs font-bold text-green-500">YES (CSV)</span>
+                <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">{t.includesManifest}</span>
+                <span className="text-xs font-bold text-green-500">{t.yesCsv}</span>
               </div>
               <div className={`flex justify-between items-center py-3 border-b ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
-                <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">Naming Scheme</span>
+                <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">{t.namingScheme}</span>
                 <span className={`text-xs font-bold ${textTitle}`}>{naming.replace(/_/g, ' ')}</span>
               </div>
             </div>
@@ -128,7 +128,7 @@ const BatchExport: React.FC<BatchExportProps> = ({ order, onBack, t, theme, onDo
               <div className="flex gap-3">
                 <i className={`fa-solid fa-circle-info ${theme === 'light' ? 'text-gold-dark' : 'text-blue-500'}`}></i>
                 <p className={`text-[10px] ${theme === 'light' ? 'text-gold-dark' : 'text-blue-400'} leading-relaxed font-medium uppercase`}>
-                  Individual downloads are available on the previous screen. Use this option for batch bulk exports.
+                  {t.exportInfo}
                 </p>
               </div>
             </div>

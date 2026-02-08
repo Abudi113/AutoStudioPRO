@@ -10,7 +10,7 @@ const corsHeaders = {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// Use the model we verified works in testing
+// Use Gemini 3.0 Pro Image Preview for generation (Supports Image Output)
 const MODEL_IMAGE = "gemini-3-pro-image-preview";
 
 Deno.serve(async (req) => {
@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
         if (action === "detect-angle") {
             console.log('🎯 Detect-angle action received');
             const result = await detectCarAngle(genAI, payload.base64Image);
-            return new Response(JSON.stringify({ angle: result }), {
+            return new Response(JSON.stringify(result), {
                 headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
         }
@@ -59,32 +59,56 @@ Deno.serve(async (req) => {
 });
 
 /** Detect if image is interior, exterior, detail, or open car shot */
-async function detectCarAngle(ai: GoogleGenerativeAI, base64Image: string): Promise<string> {
-    console.log('🚀 Starting angle detection...');
+/** Detect if image is interior, exterior, detail, or open car shot */
+async function detectCarAngle(ai: GoogleGenerativeAI, base64Image: string): Promise<{ angle: string; confidence: number }> {
+    console.log('🚀 Starting angle detection with Gemini 1.5 Pro...');
 
-    // Simple classification prompt
-    const prompt = `Classify this car image into ONE category.
-    
-    Categories:
-    - interior: steering wheel, dashboard, seats inside cabin
-    - door_open: car with doors open
-    - trunk_open: car with trunk/boot open
-    - hood_open: car with hood/bonnet open
-    - detail: close-up of wheel, headlight, or badge (no full car)
-    - front: full car front view
-    - rear: full car rear view
-    - left: full car left side
-    - right: full car right side
-    - front_left_34: front diagonal view
-    - front_right_34: front diagonal view
-    - rear_left_34: rear diagonal view
-    - rear_right_34: rear diagonal view
-    
-    Return ONLY the category name.`;
+    const prompt = `ROLE: Vision Classification System
+
+TASK:
+You must classify the input image into exactly ONE of the following categories:
+
+- EXTERIOR_CAR
+- INTERIOR_CAR
+- DETAIL_CAR
+- OTHER
+
+DEFINITIONS:
+- EXTERIOR_CAR: The outside of a vehicle is visible (body, doors, wheels, mirrors, headlights, exterior panels).
+- INTERIOR_CAR: The inside of a vehicle is visible (seats, dashboard, steering wheel, center console, interior trim).
+- DETAIL_CAR: Close-up or partial view of a vehicle component (wheel, headlight, badge, seat detail).
+- OTHER: Image does not clearly show a vehicle interior or exterior.
+
+STRICT RULES:
+- Return ONLY valid JSON.
+- Do NOT describe the image.
+- Do NOT explain your decision.
+- Do NOT suggest edits, enhancements, or generation.
+- Do NOT mention lighting, studio, background, or quality.
+- Do NOT assume context beyond what is visually dominant.
+
+OUTPUT FORMAT (JSON ONLY):
+{
+  "category": "EXTERIOR_CAR | INTERIOR_CAR | DETAIL_CAR | OTHER",
+  "confidence": 0.00
+}
+
+CONFIDENCE RULE:
+- confidence = how visually dominant the category is in the image
+- Use values between 0.00 and 1.00
+
+FINAL CHECK:
+- If the steering wheel, dashboard, or seats dominate → INTERIOR_CAR
+- If the vehicle body or wheels dominate → EXTERIOR_CAR
+- If unsure → use DETAIL_CAR or OTHER`;
 
     try {
         const cleanBase64 = base64Image.includes(",") ? base64Image.split(",")[1] : base64Image;
-        const model = ai.getGenerativeModel({ model: "gemini-1.5-pro-002" });
+        // Use the latest stable Pro model for best vision reasoning
+        const model = ai.getGenerativeModel({
+            model: "gemini-1.5-pro",
+            generationConfig: { responseMimeType: "application/json" } // Force JSON
+        });
 
         const response = await model.generateContent({
             contents: [{
@@ -96,21 +120,22 @@ async function detectCarAngle(ai: GoogleGenerativeAI, base64Image: string): Prom
             }],
         });
 
-        const result = response.response.text().trim().toLowerCase();
-        console.log('✅ Detected angle:', result);
+        const text = response.response.text();
+        console.log('✅ Visual Analysis Raw:', text);
 
-        // Clean up response to ensure it matches a valid key
-        const validKey = [
-            "interior", "door_open", "trunk_open", "hood_open", "detail",
-            "front", "rear", "left", "right",
-            "front_left_34", "front_right_34", "rear_left_34", "rear_right_34"
-        ].find(k => result.includes(k));
+        // Simple JSON parse (Gemini 1.5 Pro with responseMimeType usually returns clean JSON)
+        const data = JSON.parse(text);
+        const category = data.category?.toUpperCase() || "EXTERIOR_CAR";
+        const confidence = typeof data.confidence === 'number' ? data.confidence : 0;
 
-        return validKey || "front";
+        console.log(`✅ Parsed Category: ${category} (Confidence: ${confidence})`);
+
+        // Map to valid internal keys if needed, but we used the exact keys requested
+        return { angle: category, confidence };
 
     } catch (error) {
-        console.error("❌ Detection failed, defaulting to front:", error);
-        return "front";
+        console.error("❌ Detection failed, defaulting to EXTERIOR_CAR:", error);
+        return { angle: "EXTERIOR_CAR", confidence: 0 };
     }
 }
 
@@ -124,61 +149,53 @@ async function processCarImage(
     branding?: { isEnabled?: boolean; logoUrl?: string | null }
 ): Promise<string> {
     // 1. Route to specialized interior handling
-    if (angle === "interior" || taskType === "interior") {
+    if (angle === "INTERIOR_CAR" || angle === "interior" || taskType === "interior") {
         return processGenAI(ai, originalBase64, studioImageBase64, branding, `
             Retouch this car interior. 
             Rules:
-            1. Keep frame and geometry EXACTLY the same.
+            1. CRITICAL: Keep camera angle, frame, and perspective EXACTLY 1:1 with the original. Any change is a FAILURE.
             2. Remove all outdoor reflections from windows/screens.
             3. Fix lighting to be soft neutral studio lighting.
             4. If windows show outside, replace view with the provided studio background.
-            5. Output 4:3 aspect ratio.
+            5. If no windows are visible (or full interior shot), do NOT replace the background.
+            6. Output 4:3 aspect ratio.
+            7. The output must overlap perfectly with the original image.
         `);
     }
 
     // 2. Route to detail handling
-    if (angle === "detail") {
+    if (angle === "DETAIL_CAR" || angle === "detail") {
         return processGenAI(ai, originalBase64, studioImageBase64, branding, `
             Composite this car detail shot into the studio.
             Rules:
-            1. Keep the object geometry EXACTLY the same.
+            1. CRITICAL: Keep object geometry, angle, and perspective EXACTLY 1:1. Any shift in view is a FAILURE.
             2. Replace background with the provided studio environment.
             3. Remove harsh shadows and reflections.
             4. Output 4:3 aspect ratio.
+            5. The result must look distinctively like the original photo, just with a studio background.
         `);
     }
 
-    // 3. Route to open car handling
-    if (["door_open", "trunk_open", "hood_open"].includes(angle)) {
-        return processGenAI(ai, originalBase64, studioImageBase64, branding, `
-            Composite this car into the studio background.
-            CRITICAL: The car doors/hood/trunk are OPEN. You MUST keep them OPEN exactly as they are.
-            1. Segment the car perfectly.
-            2. Place into the studio environment provided.
-            3. Match lighting and shadows.
-            4. Do NOT close the doors or change the car's state.
-            5. Output 4:3 aspect ratio.
-        `);
-    }
-
-    // 4. Default Exterior logic
-    const anglePrompt = angle.replace(/_/g, " ");
+    // 3. Default Exterior logic (covers EXTERIOR_CAR, OTHER, and older keys)
+    const anglePrompt = angle.replace(/_/g, " ").replace("CAR", "").trim();
     return processGenAI(ai, originalBase64, studioImageBase64, branding, `
         Composite this car into the provided studio background.
-        Car Angle: ${anglePrompt}.
+        Car View: ${anglePrompt}.
         
         Rules:
-        1. Keep the car geometry, angle, and perspective EXACTLY 1:1.
-        2. Remove the original background completely.
-        3. Place car on the studio floor with realistic contact shadows.
-        4. Remove outdoor reflections from paint and glass; replace with soft studio reflections.
-        5. Neutralize lighting to 6500K studio white.
-        6. Output 4:3 aspect ratio.
-        ${branding?.isEnabled ? "7. Place the provided logo on the license plate area IF visible." : ""}
+        1. CRITICAL: Keep the car geometry, angle, and perspective EXACTLY 1:1. Any rotation or camera move is a FAILURE.
+        2. DAMAGED CARS: CRITICAL - PRESERVE ALL DAMAGE, RUST, DENTS, SCRATCHES, AND IMPERFECTIONS EXACTLY AS THEY ARE. DO NOT REPAIR THE VEHICLE.
+        3. Remove the original background completely.
+        4. Place car on the studio floor with realistic contact shadows.
+        5. Remove outdoor reflections from paint and glass; replace with soft studio reflections.
+        6. LIGHTING: Neutralize all sunlight and harsh shadows. Use soft, diffuse 6500K studio white lighting.
+        7. Output 4:3 aspect ratio.
+        ${branding?.isEnabled ? "8. Place the provided logo on the top left and on the the centre of the license plate area IF visible." : ""}
+        9. The car must look IDENTICAL to the original file (including any damage), merely transported to a studio.
     `);
 }
 
-/** Generic generation function using Gemini 3 Pro (SDK) */
+/** Generic generation function using Gemini SDK */
 async function processGenAI(
     ai: GoogleGenerativeAI,
     image1Base64: string,
@@ -201,8 +218,16 @@ async function processGenAI(
 
     parts.push({ text: promptText });
 
-    console.log(`🎨 Generating with ${MODEL_IMAGE}...`);
-    const model = ai.getGenerativeModel({ model: MODEL_IMAGE });
+    console.log(`🎨 Generating with ${MODEL_IMAGE} (SDK)...`);
+    const model = ai.getGenerativeModel({
+        model: MODEL_IMAGE,
+        safetySettings: [
+            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+        ]
+    });
 
     try {
         const response = await model.generateContent({
@@ -213,8 +238,13 @@ async function processGenAI(
         const imagePart = candidate?.content?.parts?.find((p: any) => p.inlineData);
 
         if (!imagePart?.inlineData?.data) {
-            console.error("No image in response:", JSON.stringify(response.response));
-            throw new Error("AI successfully processed but returned no image data.");
+            console.error("FULL AI RESPONSE:", JSON.stringify(response, null, 2));
+
+            const finishReason = candidate?.finishReason;
+            const safetyRatings = candidate?.safetyRatings;
+            const textPart = candidate?.content?.parts?.find((p: any) => p.text)?.text;
+
+            throw new Error(`AI Failure. Model: ${MODEL_IMAGE}. FinishReason: ${finishReason}. Text: "${textPart?.substring(0, 50)}...". Check logs for full response.`);
         }
 
         return `data:image/png;base64,${imagePart.inlineData.data}`;

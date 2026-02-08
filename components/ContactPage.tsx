@@ -2,17 +2,20 @@
 import React from 'react';
 import { Mail, MessageSquare, MapPin } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useLanguage } from '../context/LanguageContext';
 
 const ContactPage: React.FC = () => {
+    const { t } = useLanguage();
+
     return (
-        <div className="min-h-screen bg-black text-white pt-24 pb-12 px-4 sm:px-6 lg:px-8">
+        <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] pt-24 pb-12 px-4 sm:px-6 lg:px-8 transition-colors duration-300">
             <div className="max-w-4xl mx-auto">
                 <div className="text-center mb-16">
-                    <h1 className="text-4xl md:text-6xl font-black mb-6 tracking-tight">
-                        Get in Touch
+                    <h1 className="text-4xl md:text-6xl font-black mb-6 tracking-tight text-[var(--foreground)]">
+                        {t('getInTouch')}
                     </h1>
-                    <p className="text-xl text-gray-400 max-w-2xl mx-auto">
-                        Have questions about our enterprise solutions or need support? We're here to help.
+                    <p className="text-xl text-gray-500 max-w-2xl mx-auto font-medium">
+                        {t('contactSubtitle')}
                     </p>
                 </div>
 
@@ -22,9 +25,9 @@ const ContactPage: React.FC = () => {
                         <motion.div
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
-                            className="bg-zinc-900/50 p-8 rounded-3xl border border-white/10"
+                            className="bg-[var(--card)] p-8 rounded-3xl border border-[var(--border)] shadow-lg"
                         >
-                            <h3 className="text-2xl font-bold mb-6">Contact Information</h3>
+                            <h3 className="text-2xl font-bold mb-6 text-[var(--foreground)]">{t('contactInfo')}</h3>
 
                             <div className="space-y-6">
                                 <div className="flex items-start gap-4">
@@ -32,9 +35,9 @@ const ContactPage: React.FC = () => {
                                         <Mail className="w-5 h-5 text-blue-500" />
                                     </div>
                                     <div>
-                                        <h4 className="font-medium text-white">Email Us</h4>
-                                        <p className="text-gray-400 mt-1">[NEEDS UPDATING]</p>
-                                        <p className="text-sm text-gray-500 mt-1">Typical response time: 2 hours</p>
+                                        <h4 className="font-medium text-[var(--foreground)]">{t('emailUs')}</h4>
+                                        <p className="text-gray-400 mt-1">{t('needsUpdate')}</p>
+                                        <p className="text-sm text-gray-500 mt-1">{t('responseTwoHours')}</p>
                                     </div>
                                 </div>
 
@@ -43,9 +46,9 @@ const ContactPage: React.FC = () => {
                                         <MessageSquare className="w-5 h-5 text-blue-500" />
                                     </div>
                                     <div>
-                                        <h4 className="font-medium text-white">Live Support</h4>
-                                        <p className="text-gray-400 mt-1">[NEEDS UPDATING]</p>
-                                        <p className="text-sm text-gray-500 mt-1">Available Mon-Fri, 9am - 6pm EST</p>
+                                        <h4 className="font-medium text-[var(--foreground)]">{t('liveSupport')}</h4>
+                                        <p className="text-gray-400 mt-1">{t('needsUpdate')}</p>
+                                        <p className="text-sm text-gray-500 mt-1">{t('availableHours')}</p>
                                     </div>
                                 </div>
 
@@ -54,8 +57,8 @@ const ContactPage: React.FC = () => {
                                         <MapPin className="w-5 h-5 text-blue-500" />
                                     </div>
                                     <div>
-                                        <h4 className="font-medium text-white">Office</h4>
-                                        <p className="text-gray-400 mt-1">[NEEDS UPDATING]</p>
+                                        <h4 className="font-medium text-[var(--foreground)]">{t('office')}</h4>
+                                        <p className="text-gray-400 mt-1">{t('needsUpdate')}</p>
                                     </div>
                                 </div>
                             </div>
@@ -67,35 +70,35 @@ const ContactPage: React.FC = () => {
                         initial={{ opacity: 0, x: 20 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: 0.1 }}
-                        className="bg-zinc-900 border border-white/10 rounded-3xl p-8"
+                        className="bg-[var(--card)] border border-[var(--border)] rounded-3xl p-8 shadow-lg"
                     >
                         <form className="space-y-6">
                             <div>
-                                <label className="block text-sm font-medium text-gray-400 mb-2">Name</label>
+                                <label className="block text-sm font-medium text-gray-500 mb-2">{t('labelName')}</label>
                                 <input
                                     type="text"
-                                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 transition-colors"
-                                    placeholder="Your name"
+                                    className="w-full bg-[var(--background)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] focus:outline-none focus:border-blue-500 transition-colors"
+                                    placeholder={t('yourName')}
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-400 mb-2">Email</label>
+                                <label className="block text-sm font-medium text-gray-500 mb-2">{t('labelEmail')}</label>
                                 <input
                                     type="email"
-                                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 transition-colors"
-                                    placeholder="your@email.com"
+                                    className="w-full bg-[var(--background)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] focus:outline-none focus:border-blue-500 transition-colors"
+                                    placeholder={t('yourEmail')}
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-400 mb-2">Message</label>
+                                <label className="block text-sm font-medium text-gray-500 mb-2">{t('labelMessage')}</label>
                                 <textarea
                                     rows={4}
-                                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 transition-colors"
-                                    placeholder="How can we help?"
+                                    className="w-full bg-[var(--background)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] focus:outline-none focus:border-blue-500 transition-colors"
+                                    placeholder={t('messagePlaceholder')}
                                 />
                             </div>
-                            <button className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-700 font-bold transition-all shadow-lg shadow-blue-500/20">
-                                Send Message
+                            <button className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-700 font-bold transition-all shadow-lg shadow-blue-500/20 text-white">
+                                {t('sendMessage')}
                             </button>
                         </form>
                     </motion.div>

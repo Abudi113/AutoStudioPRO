@@ -1,6 +1,8 @@
+
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Camera, Lightbulb, Move, CheckCircle2 } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
 
 interface PhotoGuideProps {
     isOpen: boolean;
@@ -8,26 +10,28 @@ interface PhotoGuideProps {
 }
 
 const PhotoGuide: React.FC<PhotoGuideProps> = ({ isOpen, onClose }) => {
+    const { t } = useLanguage();
+
     const tips = [
         {
             icon: <Camera className="w-5 h-5 text-blue-500" />,
-            title: "Standard Angles",
-            desc: "Focus on Front 3/4, Side Profile, and Rear 3/4. These are the highest converting angles for buyers."
+            title: t('tipAnglesTitle'),
+            desc: t('tipAnglesDesc')
         },
         {
             icon: <Lightbulb className="w-5 h-5 text-yellow-500" />,
-            title: "Avoid Direct Sun",
-            desc: "Overcast days or shaded areas provide the most even lighting. Avoid harsh shadows and sun flares."
+            title: t('tipSunTitle'),
+            desc: t('tipSunDesc')
         },
         {
             icon: <Move className="w-5 h-5 text-green-500" />,
-            title: "Leave Space",
-            desc: "Don't crop too close. Leave space around the car so the AI can accurately render the floor and shadows."
+            title: t('tipSpaceTitle'),
+            desc: t('tipSpaceDesc')
         },
         {
             icon: <CheckCircle2 className="w-5 h-5 text-purple-500" />,
-            title: "Clean the Car",
-            desc: "The AI renders reflections based on the original surface. A clean car leads to much better results."
+            title: t('tipCleanTitle'),
+            desc: t('tipCleanDesc')
         }
     ];
 
@@ -51,8 +55,8 @@ const PhotoGuide: React.FC<PhotoGuideProps> = ({ isOpen, onClose }) => {
                         <div className="p-6 md:p-8 flex flex-col gap-8">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <h2 className="text-2xl font-black text-white">Photography Guide</h2>
-                                    <p className="text-gray-400 text-sm">Follow these tips for dealership-quality results.</p>
+                                    <h2 className="text-2xl font-black text-white">{t('guideTitle')}</h2>
+                                    <p className="text-gray-400 text-sm">{t('guideSubtitle')}</p>
                                 </div>
                                 <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-xl transition-colors">
                                     <X className="w-6 h-6 text-gray-400" />
@@ -74,9 +78,9 @@ const PhotoGuide: React.FC<PhotoGuideProps> = ({ isOpen, onClose }) => {
                             </div>
 
                             <div className="bg-blue-600/10 border border-blue-500/20 rounded-2xl p-5">
-                                <h4 className="text-sm font-bold text-blue-400 mb-2 uppercase tracking-widest">Pro Tip: Framing</h4>
+                                <h4 className="text-sm font-bold text-blue-400 mb-2 uppercase tracking-widest">{t('proTipTitle')}</h4>
                                 <p className="text-xs text-gray-300 leading-relaxed">
-                                    Position the car in the center of the frame. Ensure no other cars or distracting objects are partially visible in the foreground. Our AI works best when the subject is clear.
+                                    {t('proTipDesc')}
                                 </p>
                             </div>
 
@@ -84,7 +88,7 @@ const PhotoGuide: React.FC<PhotoGuideProps> = ({ isOpen, onClose }) => {
                                 onClick={onClose}
                                 className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl transition-all shadow-lg shadow-blue-500/20"
                             >
-                                Got it, let's shoot!
+                                {t('gotIt')}
                             </button>
                         </div>
                     </motion.div>

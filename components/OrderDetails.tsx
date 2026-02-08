@@ -1,6 +1,8 @@
 
 import React, { useState } from 'react';
 import { Order, ProcessingJob } from '../types';
+import { useAuth } from '../context/AuthContext';
+import AuthModal from './AuthModal';
 
 interface OrderDetailsProps {
   order: Order;
@@ -45,23 +47,6 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
     const ctx = canvas.getContext('2d');
     const img = new Image();
     img.onload = () => {
-      // Set canvas size to match the original image dimensions (or visible viewport?)
-      // User requested "look the way on the website downloaded"
-      // Usually this means cropping.
-
-      // We will create a canvas the size of the original * zoom? 
-      // Or keep original size and zoom into it (crop)?
-      // Standard "Digital Zoom" behavior: The Output Viewport is fixed (screen), image grows.
-      // But for a file, usually we want the "View" to be the new file.
-      // Let's implement 'Crop to View': 
-      // Source: The visible portion of the image.
-      // Destination: The full canvas size.
-
-      // actually, simpler approach: 
-      // We draw the image Scaled. 
-      // If we scale UP (Zoom In), we crop the edges. 
-      // If we scale DOWN (Zoom Out), we add borders.
-
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
 
@@ -92,6 +77,29 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
     img.src = base64;
   };
 
+  const { user } = useAuth();
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  const handleDownload = async () => {
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+
+    if (onDownloadAttempt && !(await onDownloadAttempt())) return;
+    if (selectedJob?.processedImage) {
+      downloadImage(selectedJob.processedImage, order.title, selectedJob.angle);
+    }
+  };
+
+  const handleExport = () => {
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+    onExport();
+  };
+
   return (
     <div className="max-w-7xl mx-auto flex flex-col min-h-full pb-8">
       {/* Dynamic Header */}
@@ -103,14 +111,14 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
           <div className="min-w-0">
             <h2 className={`text-xl md:text-3xl font-black truncate leading-tight ${textTitle}`}>{order.title}</h2>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="px-1.5 py-0.5 bg-green-500/10 text-green-500 text-[9px] font-black uppercase rounded border border-green-500/20">Studio Locked</span>
-              <p className="text-gray-500 text-[10px] md:text-sm font-medium">{order.jobs.length} Assets</p>
+              <span className="px-1.5 py-0.5 bg-green-500/10 text-green-500 text-[9px] font-black uppercase rounded border border-green-500/20">{t.studioLocked}</span>
+              <p className="text-gray-500 text-[10px] md:text-sm font-medium">{order.jobs.length} {t.assets}</p>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={onExport}
+            onClick={handleExport}
             className={`flex-1 sm:flex-none px-6 py-3.5 rounded-2xl ${btnAccent} text-white text-sm font-black shadow-xl shadow-blue-900/10 transition-all flex items-center justify-center gap-3 active:scale-95`}
           >
             <i className="fa-solid fa-file-zipper"></i> {t.batchExport} (ZIP)
@@ -125,9 +133,9 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
           <div className={`p-4 md:p-5 border-b ${borderCol} flex flex-wrap items-center justify-between gap-4 ${theme === 'light' ? 'bg-gray-50' : 'bg-black/40'}`}>
             <div className="flex items-center gap-4 overflow-x-auto no-scrollbar">
               <div className="flex flex-col shrink-0">
-                <span className="text-[9px] text-gray-400 font-black uppercase tracking-widest mb-0.5">Perspective</span>
+                <span className="text-[9px] text-gray-400 font-black uppercase tracking-widest mb-0.5">{t.perspective}</span>
                 <span className={`text-[12px] font-black ${theme === 'light' ? 'text-gold-dark' : 'text-blue-500'} uppercase`}>
-                  {selectedJob?.angle.replace(/_/g, ' ')}
+                  {t[selectedJob?.angle] || selectedJob?.angle?.replace(/_/g, ' ')}
                 </span>
               </div>
               <div className="h-8 w-[1px] bg-gray-300 dark:bg-white/10 shrink-0"></div>
@@ -153,24 +161,19 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
                 <button
                   onClick={() => setCompareMode('after')}
                   className={`px-4 py-2 rounded-lg text-[10px] font-black tracking-widest transition-all ${compareMode === 'after' ? `${theme === 'light' ? 'bg-white text-gold-dark shadow-sm' : 'bg-blue-600 text-white'}` : 'text-gray-500 hover:text-gray-700 dark:hover:text-white'}`}
-                >RESULT</button>
+                >{t.result}</button>
                 <button
                   onClick={() => setCompareMode('side-by-side')}
                   className={`px-4 py-2 rounded-lg text-[10px] font-black tracking-widest transition-all ${compareMode === 'side-by-side' ? `${theme === 'light' ? 'bg-white text-gold-dark shadow-sm' : 'bg-blue-600 text-white'}` : 'text-gray-500 hover:text-gray-700 dark:hover:text-white'}`}
-                >COMPARE</button>
+                >{t.compare}</button>
               </div>
             </div>
 
             <button
-              onClick={async () => {
-                if (onDownloadAttempt && !(await onDownloadAttempt())) return;
-                if (selectedJob?.processedImage) {
-                  downloadImage(selectedJob.processedImage, order.title, selectedJob.angle);
-                }
-              }}
+              onClick={handleDownload}
               className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl ${theme === 'light' ? 'bg-gold-dark text-white' : 'bg-white text-black'} text-[11px] font-black hover:scale-105 transition-transform shadow-lg shadow-black/20`}
             >
-              <i className="fa-solid fa-download"></i> {t.download} PHOTO
+              <i className="fa-solid fa-download"></i> {t.downloadPhoto}
             </button>
           </div>
 
@@ -189,7 +192,7 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
                   {!selectedJob.processedImage && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
                       <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                      <p className="text-white text-[10px] font-black uppercase tracking-[0.2em] animate-pulse">Processing Neural Studio...</p>
+                      <p className="text-white text-[10px] font-black uppercase tracking-[0.2em] animate-pulse">{t.processingNeural}</p>
                     </div>
                   )}
                 </div>
@@ -197,11 +200,11 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
                 <div className="w-full h-full flex flex-col md:flex-row gap-6 p-2 md:p-6 animate-in slide-in-from-bottom-4 duration-500">
                   <div className="flex-1 relative group bg-black/40 rounded-3xl overflow-hidden border border-white/5 ring-1 ring-white/10">
                     <img src={selectedJob.originalImage} className="w-full h-full object-contain p-2" />
-                    <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-md text-white px-3 py-1.5 rounded-lg text-[9px] font-black tracking-widest border border-white/10 uppercase">Input Asset</div>
+                    <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-md text-white px-3 py-1.5 rounded-lg text-[9px] font-black tracking-widest border border-white/10 uppercase">{t.inputAsset}</div>
                   </div>
                   <div className="flex-1 relative group bg-black/40 rounded-3xl overflow-hidden border border-white/5 ring-1 ring-white/10 shadow-2xl">
                     <img src={selectedJob.processedImage || selectedJob.originalImage} className={`w-full h-full object-contain p-2 ${!selectedJob.processedImage ? 'opacity-20' : ''}`} />
-                    <div className={`absolute top-4 left-4 ${theme === 'light' ? 'bg-gold-dark' : 'bg-blue-600'} text-white px-3 py-1.5 rounded-lg text-[9px] font-black tracking-widest uppercase shadow-xl`}>AI Render</div>
+                    <div className={`absolute top-4 left-4 ${theme === 'light' ? 'bg-gold-dark' : 'bg-blue-600'} text-white px-3 py-1.5 rounded-lg text-[9px] font-black tracking-widest uppercase shadow-xl`}>{t.aiRender}</div>
                     {!selectedJob.processedImage && (
                       <div className="absolute inset-0 flex items-center justify-center">
                         <i className="fa-solid fa-wand-magic-sparkles animate-pulse text-white/40 text-4xl"></i>
@@ -227,7 +230,7 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
                   <img src={job.processedImage || job.originalImage} className="w-full h-full object-cover" />
                   <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors"></div>
                   <div className="absolute bottom-0 left-0 right-0 p-1.5 text-[8px] font-black uppercase truncate text-white bg-black/70 text-center backdrop-blur-md">
-                    {job.angle.replace(/_/g, ' ')}
+                    {t[job.angle] || job.angle.replace(/_/g, ' ')}
                   </div>
 
                   {job.status === 'pending' && (
@@ -251,57 +254,65 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
           <div className={`${cardBg} rounded-3xl border ${borderCol} p-6 shadow-xl`}>
             <h3 className={`text-sm font-black mb-5 flex items-center gap-3 ${textTitle}`}>
               <i className="fa-solid fa-shield-halved text-blue-500"></i>
-              Enterprise Safety Check
+              {t.safetyCheck}
             </h3>
             <div className="space-y-4">
               <div className="flex justify-between items-center text-[10px] font-bold">
-                <span className="text-gray-500 uppercase tracking-widest">Car Preservation</span>
+                <span className="text-gray-500 uppercase tracking-widest">{t.carPreservation}</span>
                 <span className="text-green-500 flex items-center gap-2">
-                  <i className="fa-solid fa-circle-check"></i> 100% BIT-PERFECT
+                  <i className="fa-solid fa-circle-check"></i> {t.bitPerfect}
                 </span>
               </div>
               <div className="flex justify-between items-center text-[10px] font-bold">
-                <span className="text-gray-500 uppercase tracking-widest">Environment Alignment</span>
-                <span className={`uppercase ${theme === 'light' ? 'text-gold-dark' : 'text-blue-500'}`}>Studio-Locked</span>
+                <span className="text-gray-500 uppercase tracking-widest">{t.envAlignment}</span>
+                <span className={`uppercase ${theme === 'light' ? 'text-gold-dark' : 'text-blue-500'}`}>{t.studioLockedStatus}</span>
               </div>
               <div className={`p-4 rounded-2xl ${theme === 'light' ? 'bg-gray-50' : 'bg-[#0d0d0d]'} border ${borderCol} mt-4`}>
                 <p className="text-[10px] text-gray-500 leading-relaxed font-medium">
-                  Verification engine detected 0% foreground drift. Lighting vectors successfully re-calculated to match the chosen industrial studio setup.
+                  {t.safetyDesc}
                 </p>
               </div>
             </div>
           </div>
 
           <div className={`${cardBg} rounded-3xl border ${borderCol} p-6 shadow-xl`}>
-            <h3 className={`text-sm font-black mb-5 ${textTitle}`}>Distribution Ready</h3>
+            <h3 className={`text-sm font-black mb-5 ${textTitle}`}>{t.distributionReady}</h3>
             <div className="space-y-4">
               <div className={`p-5 rounded-2xl border border-dashed ${theme === 'light' ? 'bg-gray-50 border-gray-200' : 'bg-black/40 border-white/5'} flex flex-col items-center text-center`}>
                 <div className="w-12 h-12 bg-green-500/10 rounded-full flex items-center justify-center text-green-500 mb-3">
                   <i className="fa-solid fa-check-double"></i>
                 </div>
-                <p className="text-xs font-black mb-1 ${textTitle}">Asset Optimization Complete</p>
-                <p className="text-[10px] text-gray-500 mb-6 font-medium">Auto-resized and meta-tagged for European marketplaces.</p>
+                <p className={`text-xs font-black mb-1 ${textTitle}`}>{t.assetOptimized}</p>
+                <p className="text-[10px] text-gray-500 mb-6 font-medium">{t.assetOptimizedDesc}</p>
 
                 <button
-                  onClick={onExport}
+                  onClick={handleExport}
                   className={`w-full py-3 rounded-xl ${theme === 'light' ? 'bg-white border-gray-200 text-gray-900' : 'bg-white/5 border-white/10 text-white'} border text-[11px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all shadow-sm active:scale-95`}
                 >
-                  Configure Full Batch
+                  {t.configureBatch}
                 </button>
               </div>
 
               <div className="grid grid-cols-2 gap-3 mt-4">
                 <button className={`flex items-center justify-center py-3 rounded-xl ${theme === 'light' ? 'bg-gray-100' : 'bg-white/5'} border ${borderCol} text-[9px] font-black uppercase tracking-wider hover:border-blue-500/50 transition-all active:scale-95`}>
-                  Mobile.de Sync
+                  {t.mobileSync}
                 </button>
                 <button className={`flex items-center justify-center py-3 rounded-xl ${theme === 'light' ? 'bg-gray-100' : 'bg-white/5'} border ${borderCol} text-[9px] font-black uppercase tracking-wider hover:border-orange-500/50 transition-all active:scale-95`}>
-                  AutoScout Link
+                  {t.autoscoutLink}
                 </button>
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Auth Modal for Unregistered Users */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        title={t.accountRequired}
+        description={t.accountRequiredDesc}
+      />
     </div>
   );
 };

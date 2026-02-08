@@ -37,13 +37,13 @@ const iconMap: Record<string, React.ReactNode> = {
 const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSelect, branding, onLogoUpload, onToggleBranding, t, theme }) => {
   // Enhanced Glassmorphism & Theme Styles
   // Matches LandingPage premium feel
-  const bgStyle = theme === 'light'
-    ? 'bg-white/40 border-white/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)]'
-    : 'bg-white/5 border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.4)]';
 
-  const textPrimary = theme === 'light' ? 'text-gray-900' : 'text-white';
-  const textSecondary = theme === 'light' ? 'text-gray-500' : 'text-gray-400';
-  const accentGradient = 'bg-gradient-to-r from-blue-600 to-blue-500';
+  const textPrimary = 'text-[var(--foreground)]';
+  const textSecondary = 'text-gray-500';
+
+  // Use CSS variables for card backgrounds to ensure they match global theme
+  const cardBase = "backdrop-blur-md border shadow-xl transition-all duration-300";
+  const cardStyle = "bg-[var(--card)] border-[var(--border)]";
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -79,12 +79,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
         </div>
 
         {/* Brand Management Card */}
-        <div className={`p-6 rounded-3xl backdrop-blur-md border ${theme === 'light' ? 'bg-white border-gray-100 shadow-xl' : 'bg-white/5 border-white/10'}`}>
+        <div className={`p-6 rounded-3xl ${cardBase} ${cardStyle}`}>
           <div className="flex items-center gap-6">
             <div className="relative group">
               <label className="cursor-pointer block relative">
                 <input type="file" className="hidden" accept="image/*" onChange={onLogoUpload} />
-                <div className={`w-20 h-20 rounded-2xl flex items-center justify-center overflow-hidden transition-all duration-300 group-hover:scale-105 border-2 border-dashed ${theme === 'light' ? 'border-gray-200 bg-gray-50' : 'border-white/20 bg-white/5'}`}>
+                <div className={`w-20 h-20 rounded-2xl flex items-center justify-center overflow-hidden transition-all duration-300 group-hover:scale-105 border-2 border-dashed border-[var(--border)] bg-[var(--background)]`}>
                   {branding.logoUrl ? (
                     <img src={branding.logoUrl} className="w-full h-full object-contain p-2" alt="Logo" />
                   ) : (
@@ -98,10 +98,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
             </div>
 
             <div className="flex flex-col gap-2">
-              <span className="text-[10px] font-black opacity-50 uppercase tracking-widest">Dealership Branding</span>
+              <span className="text-[10px] font-black opacity-50 uppercase tracking-widest text-[var(--foreground)]">{t.branding}</span>
               <div className="flex items-center gap-4">
                 <span className={`text-sm font-bold ${branding.isEnabled ? 'text-green-500' : textSecondary}`}>
-                  {branding.isEnabled ? 'Active' : 'Disabled'}
+                  {branding.isEnabled ? t.active : t.disabled}
                 </span>
                 <button
                   onClick={onToggleBranding}
@@ -129,7 +129,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
             <button
               key={task.id}
               onClick={() => onTaskSelect(task)}
-              className={`group relative p-8 rounded-[32px] text-left transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl overflow-hidden backdrop-blur-md border ${theme === 'light' ? 'bg-white border-gray-100 shadow-lg hover:border-blue-200' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-blue-500/30'}`}
+              className={`group relative p-8 rounded-[32px] text-left transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl overflow-hidden ${cardBase} ${cardStyle} hover:border-blue-500/30`}
             >
               {/* Background Glow */}
               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/20 rounded-full blur-3xl -mr-16 -mt-16 transition-opacity opacity-0 group-hover:opacity-100" />
@@ -138,8 +138,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
                 {iconMap[task.icon] || <Sparkles className="w-8 h-8" />}
               </div>
 
-              <h4 className={`text-xl font-bold mb-3 ${textPrimary}`}>{task.label}</h4>
-              <p className={`text-sm leading-relaxed ${textSecondary}`}>{task.description}</p>
+              <h4 className={`text-xl font-bold mb-3 ${textPrimary}`}>{t[task.label] || task.label}</h4>
+              <p className={`text-sm leading-relaxed ${textSecondary}`}>{t[task.description] || task.description}</p>
 
               <div className={`absolute bottom-6 right-6 p-2 rounded-full opacity-0 transform translate-x-4 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 ${theme === 'light' ? 'bg-blue-50 text-blue-600' : 'bg-blue-600 text-white'}`}>
                 <ChevronRight className="w-4 h-4" />
@@ -163,12 +163,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
           </button>
         </div>
 
-        <div className={`rounded-[32px] overflow-hidden backdrop-blur-md border ${theme === 'light' ? 'bg-white border-gray-100 shadow-xl' : 'bg-white/5 border-white/10'}`}>
+        <div className={`rounded-[32px] overflow-hidden ${cardBase} ${cardStyle}`}>
           {orders.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse min-w-[800px]">
                 <thead>
-                  <tr className={`border-b ${theme === 'light' ? 'border-gray-100 bg-gray-50/50' : 'border-white/5 bg-white/5'}`}>
+                  <tr className={`border-b border-[var(--border)] bg-[var(--background)]/50`}>
                     <th className="px-8 py-6 text-xs font-black text-gray-400 uppercase tracking-widest">{t.orderVin}</th>
                     <th className="px-8 py-6 text-xs font-black text-gray-400 uppercase tracking-widest">{t.photos}</th>
                     <th className="px-8 py-6 text-xs font-black text-gray-400 uppercase tracking-widest">{t.status}</th>
@@ -176,17 +176,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
                     <th className="px-8 py-6"></th>
                   </tr>
                 </thead>
-                <tbody className={`divide-y ${theme === 'light' ? 'divide-gray-100' : 'divide-white/5'}`}>
+                <tbody className={`divide-y divide-[var(--border)]`}>
                   {orders.map((order) => (
                     <tr
                       key={order.id}
                       onClick={() => onOrderSelect(order)}
-                      className="group cursor-pointer transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                      className="group cursor-pointer transition-colors hover:bg-[var(--foreground)]/5"
                     >
                       <td className="px-8 py-6">
                         <div className={`text-base font-bold ${textPrimary}`}>{order.title}</div>
                         <div className="text-xs text-gray-500 font-mono mt-1 opacity-70 group-hover:opacity-100 transition-opacity">
-                          {order.vin || 'NO VIN DETECTED'}
+                          {order.vin || t.noVinDetected}
                         </div>
                       </td>
                       <td className="px-8 py-6">
@@ -207,8 +207,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
                       </td>
                       <td className="px-8 py-6">
                         <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${order.status === 'completed'
-                            ? 'bg-green-500/10 text-green-500 border-green-500/20'
-                            : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+                          ? 'bg-green-500/10 text-green-500 border-green-500/20'
+                          : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
                           }`}>
                           {order.status === 'completed' ? <CheckCircle className="w-3 h-3" /> : <Clock className="w-3 h-3 animate-pulse" />}
                           {order.status}
@@ -241,7 +241,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
                 className="px-6 py-3 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg shadow-blue-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-2"
               >
                 <Plus className="w-4 h-4" />
-                Create New Project
+                {t.createNewProject}
               </button>
             </div>
           )}

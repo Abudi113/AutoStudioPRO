@@ -51,15 +51,15 @@ async function loadStudioRef(studioId: string): Promise<string> {
 }
 
 /** Detect if image is interior or exterior */
-export const detectCarAngle = async (base64Image: string): Promise<CameraAngle> => {
+export const detectCarAngle = async (base64Image: string): Promise<{ angle: CameraAngle; confidence: number }> => {
   if (!isSupabaseConfigured()) {
     console.warn("Supabase not configured, defaulting to 'front' angle");
-    return 'front';
+    return { angle: 'front', confidence: 0 };
   }
 
   try {
     console.log('🌐 Calling Supabase edge function for angle detection...');
-    const result = await callEdgeFunction<{ angle: string }>("process-image", {
+    const result = await callEdgeFunction<{ angle: string; confidence: number }>("process-image", {
       action: "detect-angle",
       payload: { base64Image },
     });
@@ -73,23 +73,23 @@ export const detectCarAngle = async (base64Image: string): Promise<CameraAngle> 
       'detail',
       'door_open',
       'trunk_open',
-      'hood_open'
-    ];
+      'hood_open',
+      'EXTERIOR_CAR', 'INTERIOR_CAR', 'DETAIL_CAR', 'OTHER'
+    ] as any;
 
     console.log('🔍 Detection result from server:', result.angle);
-    console.log('✓ Valid angles list:', validAngles);
-    console.log('🔎 Is angle valid?', validAngles.includes(result.angle as CameraAngle));
 
-    const finalAngle = validAngles.includes(result.angle as CameraAngle)
+    // Normalize logic if needed, currently passing through whatever strict category we got
+    const finalAngle = validAngles.includes(result.angle as any)
       ? (result.angle as CameraAngle)
       : 'front';
 
-    console.log('✅ Final angle being returned:', finalAngle);
+    console.log(`✅ Final angle: ${finalAngle} (Confidence: ${result.confidence})`);
 
-    return finalAngle;
+    return { angle: finalAngle, confidence: result.confidence };
   } catch (error) {
     console.error("❌ Detection Error:", error);
-    return 'front';
+    return { angle: 'front', confidence: 0 };
   }
 };
 

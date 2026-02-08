@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Shield, ArrowRight, ArrowLeft } from 'lucide-react';
 import { useCredits } from '../context/CreditsContext';
+import { useLanguage } from '../context/LanguageContext';
 
 interface VaultModalProps {
     isOpen: boolean;
@@ -10,6 +11,7 @@ interface VaultModalProps {
 }
 
 const VaultModal: React.FC<VaultModalProps> = ({ isOpen, onClose }) => {
+    const { t } = useLanguage();
     const { totalCredits, creditsVault, moveToVault, moveFromVault, loading } = useCredits();
     const [amount, setAmount] = useState<string>('');
     const [mode, setMode] = useState<'deposit' | 'withdraw'>('deposit');
@@ -30,7 +32,7 @@ const VaultModal: React.FC<VaultModalProps> = ({ isOpen, onClose }) => {
             // Cap at 20 vault limit not strictly enforced here but usually backend does it
             // Assuming backend handles the 20 limit or we check here
             if (creditsVault + val > 20) {
-                alert("Vault limit is 20 credits.");
+                alert(t('vaultLimitAlert'));
                 return;
             }
             success = await moveToVault(val);
@@ -79,9 +81,9 @@ const VaultModal: React.FC<VaultModalProps> = ({ isOpen, onClose }) => {
                                     {creditsVault}
                                 </div>
                             </div>
-                            <h2 className="text-2xl font-bold text-white mb-2">Credit Vault</h2>
+                            <h2 className="text-2xl font-bold text-white mb-2">{t('vaultTitle')}</h2>
                             <p className="text-gray-400 text-sm">
-                                Securely store up to 20 credits that never expire and are safe from monthly resets.
+                                {t('vaultDesc')}
                             </p>
                         </div>
 
@@ -90,20 +92,20 @@ const VaultModal: React.FC<VaultModalProps> = ({ isOpen, onClose }) => {
                                 onClick={() => setMode('deposit')}
                                 className={`p-4 rounded-xl border cursor-pointer transition-all ${mode === 'deposit' ? 'bg-blue-600/10 border-blue-500/50 ring-1 ring-blue-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
                             >
-                                <p className="text-xs text-gray-400 mb-1">Available</p>
+                                <p className="text-xs text-gray-400 mb-1">{t('available')}</p>
                                 <p className="text-xl font-bold text-white mb-2">{availableToDeposit}</p>
                                 <div className="flex items-center gap-1 text-[10px] text-blue-400 font-bold uppercase tracking-wider">
-                                    Deposit <ArrowRight className="w-3 h-3" />
+                                    {t('deposit')} <ArrowRight className="w-3 h-3" />
                                 </div>
                             </div>
                             <div
                                 onClick={() => setMode('withdraw')}
                                 className={`p-4 rounded-xl border cursor-pointer transition-all ${mode === 'withdraw' ? 'bg-blue-600/10 border-blue-500/50 ring-1 ring-blue-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
                             >
-                                <p className="text-xs text-gray-400 mb-1">Vaulted</p>
+                                <p className="text-xs text-gray-400 mb-1">{t('vaulted')}</p>
                                 <p className="text-xl font-bold text-white mb-2">{creditsVault} <span className="text-sm text-gray-500 font-normal">/ 20</span></p>
                                 <div className="flex items-center gap-1 text-[10px] text-blue-400 font-bold uppercase tracking-wider">
-                                    <ArrowLeft className="w-3 h-3" /> Withdraw
+                                    <ArrowLeft className="w-3 h-3" /> {t('withdraw')}
                                 </div>
                             </div>
                         </div>
@@ -111,7 +113,7 @@ const VaultModal: React.FC<VaultModalProps> = ({ isOpen, onClose }) => {
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-xs font-bold uppercase text-gray-500 mb-1">
-                                    Amount to {mode === 'deposit' ? 'Store' : 'Retrieve'}
+                                    {mode === 'deposit' ? t('amountToStore') : t('amountToRetrieve')}
                                 </label>
                                 <div className="relative">
                                     <input
@@ -127,7 +129,7 @@ const VaultModal: React.FC<VaultModalProps> = ({ isOpen, onClose }) => {
                                         onClick={() => setAmount(String(mode === 'deposit' ? Math.min(availableToDeposit, 20 - creditsVault) : availableToWithdraw))}
                                         className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 text-xs font-bold text-blue-500 hover:bg-blue-500/10 rounded"
                                     >
-                                        MAX
+                                        {t('max')}
                                     </button>
                                 </div>
                             </div>
@@ -140,11 +142,11 @@ const VaultModal: React.FC<VaultModalProps> = ({ isOpen, onClose }) => {
                                 {loading ? (
                                     <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                                 ) : status === 'success' ? (
-                                    'Transfer Complete!'
+                                    t('transferComplete')
                                 ) : status === 'error' ? (
-                                    'Transfer Failed'
+                                    t('transferFailed')
                                 ) : (
-                                    mode === 'deposit' ? 'Store in Vault' : 'Retrieve from Vault'
+                                    mode === 'deposit' ? t('storeInVault') : t('retrieveFromVault')
                                 )}
                             </button>
                         </div>

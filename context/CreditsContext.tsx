@@ -78,7 +78,6 @@ export const CreditsProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         // Try positive amount for move_to_vault
         const { data, error } = await supabase.rpc('move_to_vault', {
-            user_id: user.id,
             amount
         });
 
@@ -96,7 +95,6 @@ export const CreditsProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         // Try calling move_from_vault
         const { data, error } = await supabase.rpc('move_from_vault', {
-            user_id: user.id,
             amount
         });
 
