@@ -8,9 +8,10 @@ interface OrderDetailsProps {
   onExport: () => void;
   t: any;
   theme: 'light' | 'dark';
+  onDownloadAttempt?: () => Promise<boolean> | boolean;
 }
 
-const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t, theme }) => {
+const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t, theme, onDownloadAttempt }) => {
   const [selectedJob, setSelectedJob] = useState<ProcessingJob | null>(order.jobs[0] || null);
   const [compareMode, setCompareMode] = useState<'after' | 'side-by-side'>('after');
   const [zoom, setZoom] = useState<number>(1);
@@ -161,7 +162,12 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
             </div>
 
             <button
-              onClick={() => selectedJob?.processedImage && downloadImage(selectedJob.processedImage, order.title, selectedJob.angle)}
+              onClick={async () => {
+                if (onDownloadAttempt && !(await onDownloadAttempt())) return;
+                if (selectedJob?.processedImage) {
+                  downloadImage(selectedJob.processedImage, order.title, selectedJob.angle);
+                }
+              }}
               className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl ${theme === 'light' ? 'bg-gold-dark text-white' : 'bg-white text-black'} text-[11px] font-black hover:scale-105 transition-transform shadow-lg shadow-black/20`}
             >
               <i className="fa-solid fa-download"></i> {t.download} PHOTO

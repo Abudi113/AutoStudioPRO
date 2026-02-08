@@ -8,9 +8,10 @@ interface BatchExportProps {
   onBack: () => void;
   t: any;
   theme: 'light' | 'dark';
+  onDownloadAttempt?: () => Promise<boolean> | boolean;
 }
 
-const BatchExport: React.FC<BatchExportProps> = ({ order, onBack, t, theme }) => {
+const BatchExport: React.FC<BatchExportProps> = ({ order, onBack, t, theme, onDownloadAttempt }) => {
   const [resolution, setResolution] = useState('2k');
   const [format, setFormat] = useState('jpeg');
   const [naming, setNaming] = useState('VIN_ANGLE');
@@ -20,19 +21,21 @@ const BatchExport: React.FC<BatchExportProps> = ({ order, onBack, t, theme }) =>
   const cardBg = theme === 'light' ? 'bg-white' : 'bg-[#141414]';
   const borderCol = theme === 'light' ? 'border-gray-200' : 'border-white/10';
 
-  const handleExport = () => {
+  const handleExport = async () => {
+    if (onDownloadAttempt && !(await onDownloadAttempt())) return;
+
     setIsExporting(true);
-    
+
     // Simulate complex packaging
     setTimeout(() => {
       // 1. Create Manifest (Inventory CSV style)
       const csvHeader = "File_Name,Vehicle_Angle,Resolution,Format,Studio_Template,Status\n";
-      const csvRows = order.jobs.map(j => 
+      const csvRows = order.jobs.map(j =>
         `${order.vin || 'CAR'}_${j.angle}.${format},${j.angle},${resolution.toUpperCase()},${format.toUpperCase()},${order.studioId},${j.status}`
       ).join('\n');
-      
+
       const manifestContent = csvHeader + csvRows;
-      
+
       // 2. Trigger Download (In a real app this would bundle the images, 
       // here we provide the inventory control file and instructions)
       const blob = new Blob([manifestContent], { type: 'text/csv' });
@@ -44,7 +47,7 @@ const BatchExport: React.FC<BatchExportProps> = ({ order, onBack, t, theme }) =>
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
+
       setIsExporting(false);
       alert(lang === 'de' ? 'Inventar-Paket wurde erstellt!' : 'Inventory Pro Package created!');
     }, 2000);
@@ -66,81 +69,79 @@ const BatchExport: React.FC<BatchExportProps> = ({ order, onBack, t, theme }) =>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12">
         <div className="space-y-8">
-           <section>
-             <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-4">{t.resolution}</h3>
-             <div className="grid grid-cols-2 gap-3">
-               {['original', '1080p', '2k', '4k'].map((r) => (
-                 <button 
-                   key={r}
-                   onClick={() => setResolution(r)}
-                   className={`p-4 rounded-xl border text-sm font-bold transition-all ${
-                     resolution === r 
-                     ? (theme === 'light' ? 'bg-gold-dark border-gold-dark text-white' : 'bg-blue-600 border-blue-500 text-white') 
-                     : `${theme === 'light' ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-white/5 border-white/10 text-gray-400'}`
-                   }`}
-                 >
-                   {r.toUpperCase()}
-                 </button>
-               ))}
-             </div>
-           </section>
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-4">{t.resolution}</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {['original', '1080p', '2k', '4k'].map((r) => (
+                <button
+                  key={r}
+                  onClick={() => setResolution(r)}
+                  className={`p-4 rounded-xl border text-sm font-bold transition-all ${resolution === r
+                    ? (theme === 'light' ? 'bg-gold-dark border-gold-dark text-white' : 'bg-blue-600 border-blue-500 text-white')
+                    : `${theme === 'light' ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-white/5 border-white/10 text-gray-400'}`
+                    }`}
+                >
+                  {r.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </section>
 
-           <section>
-             <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-4">{t.format}</h3>
-             <div className="flex gap-3">
-               {['jpeg', 'png', 'webp'].map((f) => (
-                 <button 
-                   key={f}
-                   onClick={() => setFormat(f)}
-                   className={`flex-1 p-4 rounded-xl border text-sm font-bold transition-all ${
-                     format === f 
-                     ? (theme === 'light' ? 'bg-gold-dark border-gold-dark text-white' : 'bg-blue-600 border-blue-500 text-white') 
-                     : `${theme === 'light' ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-white/5 border-white/10 text-gray-400'}`
-                   }`}
-                 >
-                   {f.toUpperCase()}
-                 </button>
-               ))}
-             </div>
-           </section>
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-4">{t.format}</h3>
+            <div className="flex gap-3">
+              {['jpeg', 'png', 'webp'].map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFormat(f)}
+                  className={`flex-1 p-4 rounded-xl border text-sm font-bold transition-all ${format === f
+                    ? (theme === 'light' ? 'bg-gold-dark border-gold-dark text-white' : 'bg-blue-600 border-blue-500 text-white')
+                    : `${theme === 'light' ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-white/5 border-white/10 text-gray-400'}`
+                    }`}
+                >
+                  {f.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </section>
         </div>
 
         <div className={`${cardBg} rounded-3xl border ${borderCol} p-6 md:p-8 flex flex-col shadow-xl`}>
-           <div className="flex-1">
-             <h3 className={`text-lg font-bold mb-6 ${textTitle}`}>{t.summary}</h3>
-             <div className="space-y-4 mb-10">
-               <div className={`flex justify-between items-center py-3 border-b ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
-                 <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">Package Format</span>
-                 <span className={`text-sm font-extrabold ${textTitle}`}>COMPRESSED ZIP</span>
-               </div>
-               <div className={`flex justify-between items-center py-3 border-b ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
-                 <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">Includes Manifest</span>
-                 <span className="text-xs font-bold text-green-500">YES (CSV)</span>
-               </div>
-               <div className={`flex justify-between items-center py-3 border-b ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
-                 <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">Naming Scheme</span>
-                 <span className={`text-xs font-bold ${textTitle}`}>{naming.replace(/_/g, ' ')}</span>
-               </div>
-             </div>
+          <div className="flex-1">
+            <h3 className={`text-lg font-bold mb-6 ${textTitle}`}>{t.summary}</h3>
+            <div className="space-y-4 mb-10">
+              <div className={`flex justify-between items-center py-3 border-b ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
+                <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">Package Format</span>
+                <span className={`text-sm font-extrabold ${textTitle}`}>COMPRESSED ZIP</span>
+              </div>
+              <div className={`flex justify-between items-center py-3 border-b ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
+                <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">Includes Manifest</span>
+                <span className="text-xs font-bold text-green-500">YES (CSV)</span>
+              </div>
+              <div className={`flex justify-between items-center py-3 border-b ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
+                <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">Naming Scheme</span>
+                <span className={`text-xs font-bold ${textTitle}`}>{naming.replace(/_/g, ' ')}</span>
+              </div>
+            </div>
 
-             <div className={`${theme === 'light' ? 'bg-gold-dark/5 border-gold-dark/20' : 'bg-blue-600/10 border-blue-600/20'} p-4 rounded-xl mb-8 border border-dashed`}>
-               <div className="flex gap-3">
-                 <i className={`fa-solid fa-circle-info ${theme === 'light' ? 'text-gold-dark' : 'text-blue-500'}`}></i>
-                 <p className={`text-[10px] ${theme === 'light' ? 'text-gold-dark' : 'text-blue-400'} leading-relaxed font-medium uppercase`}>
-                   Individual downloads are available on the previous screen. Use this option for batch bulk exports.
-                 </p>
-               </div>
-             </div>
-           </div>
+            <div className={`${theme === 'light' ? 'bg-gold-dark/5 border-gold-dark/20' : 'bg-blue-600/10 border-blue-600/20'} p-4 rounded-xl mb-8 border border-dashed`}>
+              <div className="flex gap-3">
+                <i className={`fa-solid fa-circle-info ${theme === 'light' ? 'text-gold-dark' : 'text-blue-500'}`}></i>
+                <p className={`text-[10px] ${theme === 'light' ? 'text-gold-dark' : 'text-blue-400'} leading-relaxed font-medium uppercase`}>
+                  Individual downloads are available on the previous screen. Use this option for batch bulk exports.
+                </p>
+              </div>
+            </div>
+          </div>
 
-           <button 
-             onClick={handleExport}
-             disabled={isExporting}
-             className={`w-full py-4 rounded-2xl ${theme === 'light' ? 'bg-gold-dark text-white hover:bg-gold-light' : 'bg-blue-600 text-white hover:bg-blue-700'} font-extrabold text-lg transition-all shadow-xl disabled:opacity-50 flex items-center justify-center gap-3`}
-           >
-             {isExporting ? <i className="fa-solid fa-sync animate-spin"></i> : <i className="fa-solid fa-file-zipper"></i>}
-             {t.generateZip}
-           </button>
+          <button
+            onClick={handleExport}
+            disabled={isExporting}
+            className={`w-full py-4 rounded-2xl ${theme === 'light' ? 'bg-gold-dark text-white hover:bg-gold-light' : 'bg-blue-600 text-white hover:bg-blue-700'} font-extrabold text-lg transition-all shadow-xl disabled:opacity-50 flex items-center justify-center gap-3`}
+          >
+            {isExporting ? <i className="fa-solid fa-sync animate-spin"></i> : <i className="fa-solid fa-file-zipper"></i>}
+            {t.generateZip}
+          </button>
         </div>
       </div>
     </div>

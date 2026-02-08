@@ -2,6 +2,8 @@
 import React, { useState } from 'react';
 import { CameraAngle } from '../types';
 import { detectCarAngle } from '../services/geminiService';
+import PhotoGuide from './PhotoGuide';
+import { HelpCircle } from 'lucide-react';
 
 interface UploadChoiceProps {
   onSelectCamera: () => void;
@@ -14,6 +16,7 @@ interface UploadChoiceProps {
 const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadComplete, onBack, t, theme }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [showGuide, setShowGuide] = useState(false);
 
   const textTitle = theme === 'light' ? 'text-gray-900' : 'text-white';
   const cardBg = theme === 'light' ? 'bg-white' : 'bg-[#141414]';
@@ -60,7 +63,7 @@ const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadCom
         <h3 className={`text-2xl font-black mb-3 ${textTitle}`}>AI Vision Analyzing...</h3>
         <p className="text-gray-500 text-sm mb-10 font-medium">Scanning assets for orientation, interior identification, and geometry synchronization.</p>
         <div className={`w-full h-3 ${theme === 'light' ? 'bg-gray-200' : 'bg-white/10'} rounded-full overflow-hidden shadow-inner`}>
-          <div 
+          <div
             className={`h-full ${theme === 'light' ? 'bg-gold-dark' : 'bg-blue-600'} transition-all duration-300 shadow-lg`}
             style={{ width: `${analysisProgress}%` }}
           ></div>
@@ -72,6 +75,15 @@ const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadCom
 
   return (
     <div className="max-w-6xl mx-auto h-full flex flex-col justify-center py-6 px-4">
+      <div className="absolute top-8 right-8">
+        <button
+          onClick={() => setShowGuide(true)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${theme === 'light' ? 'bg-gray-100 text-gray-600' : 'bg-white/5 text-gray-400'} hover:bg-blue-500/10 hover:text-blue-500 border border-transparent hover:border-blue-500/20`}
+        >
+          <HelpCircle className="w-4 h-4" />
+          Photography Tips
+        </button>
+      </div>
       <header className="mb-20 text-center">
         <h2 className={`text-3xl md:text-5xl font-black mb-4 ${textTitle} tracking-tight`}>{t.howToProceed}</h2>
         <p className="text-gray-500 text-base md:text-lg font-medium">{t.subtitle}</p>

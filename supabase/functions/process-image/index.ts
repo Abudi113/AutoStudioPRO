@@ -1,15 +1,17 @@
 // Supabase Edge Function for Gemini AI image processing
 // This keeps your API key secure on the server
 
-import { GoogleGenAI } from "npm:@google/genai@^1.38.0";
+// @ts-ignore
+import { GoogleGenerativeAI } from "npm:@google/generative-ai";
 
 const corsHeaders = {
-    "Access-Control-Allow-Origin": "https://carveoo.netlify.app",
+    "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const MODEL_IMAGE = "gemini-2.5-flash-image";
+// Use the model we verified works in testing
+const MODEL_IMAGE = "gemini-3-pro-image-preview";
 
 Deno.serve(async (req) => {
     // Handle CORS preflight
@@ -23,12 +25,12 @@ Deno.serve(async (req) => {
             throw new Error("GEMINI_API_KEY not configured");
         }
 
-        const ai = new GoogleGenAI({ apiKey });
-
+        const genAI = new GoogleGenerativeAI(apiKey);
         const { action, payload } = await req.json();
 
         if (action === "detect-angle") {
-            const result = await detectCarAngle(ai, payload.base64Image);
+            console.log('🎯 Detect-angle action received');
+            const result = await detectCarAngle(genAI, payload.base64Image);
             return new Response(JSON.stringify({ angle: result }), {
                 headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
@@ -36,7 +38,7 @@ Deno.serve(async (req) => {
 
         if (action === "process-image") {
             const result = await processCarImage(
-                ai,
+                genAI,
                 payload.originalBase64,
                 payload.studioImageBase64,
                 payload.angle,
@@ -48,196 +50,176 @@ Deno.serve(async (req) => {
             });
         }
 
-        return new Response(JSON.stringify({ error: "Unknown action" }), {
-            status: 400,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-    } catch (error) {
-        console.error("Edge function error:", error);
-        return new Response(
-            JSON.stringify({ error: error.message || "Internal server error" }),
-            {
-                status: 500,
-                headers: { ...corsHeaders, "Content-Type": "application/json" },
-            }
-        );
+        return new Response(JSON.stringify({ error: "Unknown action" }), { status: 400, headers: corsHeaders });
+    } catch (e) {
+        console.error("Function error:", e);
+        const errorMessage = e instanceof Error ? e.message : "Internal server error";
+        return new Response(JSON.stringify({ error: errorMessage }), { status: 500, headers: corsHeaders });
     }
 });
 
-/** Detect if image is interior or exterior */
-async function detectCarAngle(ai: GoogleGenAI, base64Image: string): Promise<string> {
-    const prompt = `
-    Analyze this automotive photo and classify it into exactly one of the following categories:
-    - front
-    - rear
-    - left
-    - right
-    - front_left_34
-    - front_right_34
-    - rear_left_34
-    - rear_right_34
-    - interior (Select this if the photo shows the inside of the car, dashboard, seats, or cabin)
+/** Detect if image is interior, exterior, detail, or open car shot */
+async function detectCarAngle(ai: GoogleGenerativeAI, base64Image: string): Promise<string> {
+    console.log('🚀 Starting angle detection...');
 
-    Return ONLY the label string.
-  `;
+    // Simple classification prompt
+    const prompt = `Classify this car image into ONE category.
+    
+    Categories:
+    - interior: steering wheel, dashboard, seats inside cabin
+    - door_open: car with doors open
+    - trunk_open: car with trunk/boot open
+    - hood_open: car with hood/bonnet open
+    - detail: close-up of wheel, headlight, or badge (no full car)
+    - front: full car front view
+    - rear: full car rear view
+    - left: full car left side
+    - right: full car right side
+    - front_left_34: front diagonal view
+    - front_right_34: front diagonal view
+    - rear_left_34: rear diagonal view
+    - rear_right_34: rear diagonal view
+    
+    Return ONLY the category name.`;
 
     try {
-        const response = await ai.models.generateContent({
-            model: "gemini-1.5-flash",
-            contents: {
+        const cleanBase64 = base64Image.includes(",") ? base64Image.split(",")[1] : base64Image;
+        const model = ai.getGenerativeModel({ model: "gemini-1.5-pro-002" });
+
+        const response = await model.generateContent({
+            contents: [{
+                role: "user",
                 parts: [
-                    {
-                        inlineData: {
-                            data: base64Image.includes(",") ? base64Image.split(",")[1] : base64Image,
-                            mimeType: "image/png",
-                        },
-                    },
+                    { inlineData: { data: cleanBase64, mimeType: "image/png" } },
                     { text: prompt },
                 ],
-            },
+            }],
         });
 
-        const detected = response.text?.trim().toLowerCase();
-        const validAngles = [
-            "front", "rear", "left", "right",
-            "front_left_34", "front_right_34", "rear_left_34", "rear_right_34",
-            "interior",
-        ];
+        const result = response.response.text().trim().toLowerCase();
+        console.log('✅ Detected angle:', result);
 
-        return validAngles.includes(detected!) ? detected! : "front";
+        // Clean up response to ensure it matches a valid key
+        const validKey = [
+            "interior", "door_open", "trunk_open", "hood_open", "detail",
+            "front", "rear", "left", "right",
+            "front_left_34", "front_right_34", "rear_left_34", "rear_right_34"
+        ].find(k => result.includes(k));
+
+        return validKey || "front";
+
     } catch (error) {
-        console.error("Detection Error:", error);
+        console.error("❌ Detection failed, defaulting to front:", error);
         return "front";
     }
 }
 
-/** Process car image with studio background */
+/** Core processing logic routing */
 async function processCarImage(
-    ai: GoogleGenAI,
+    ai: GoogleGenerativeAI,
     originalBase64: string,
     studioImageBase64: string,
     angle: string,
     taskType: string = "bg-replacement",
     branding?: { isEnabled?: boolean; logoUrl?: string | null }
 ): Promise<string> {
-    const hasLogo = Boolean(branding?.isEnabled && branding?.logoUrl);
+    // 1. Route to specialized interior handling
+    if (angle === "interior" || taskType === "interior") {
+        return processGenAI(ai, originalBase64, studioImageBase64, branding, `
+            Retouch this car interior. 
+            Rules:
+            1. Keep frame and geometry EXACTLY the same.
+            2. Remove all outdoor reflections from windows/screens.
+            3. Fix lighting to be soft neutral studio lighting.
+            4. If windows show outside, replace view with the provided studio background.
+            5. Output 4:3 aspect ratio.
+        `);
+    }
 
-    const taskPrompt = `
-You are an AI that composites cars into studio environments. You must follow these steps IN ORDER.
+    // 2. Route to detail handling
+    if (angle === "detail") {
+        return processGenAI(ai, originalBase64, studioImageBase64, branding, `
+            Composite this car detail shot into the studio.
+            Rules:
+            1. Keep the object geometry EXACTLY the same.
+            2. Replace background with the provided studio environment.
+            3. Remove harsh shadows and reflections.
+            4. Output 4:3 aspect ratio.
+        `);
+    }
 
-#####################################################################
-CRITICAL FIRST RULE - READ THIS BEFORE ANYTHING ELSE:
-THE VIEWING ANGLE OF THE CAR MUST NOT CHANGE.
-- If the input shows the REAR of the car → output must show the REAR
-- If the input shows the FRONT of the car → output must show the FRONT  
-- If the input shows the LEFT SIDE → output must show the LEFT SIDE
-- If the input shows the RIGHT SIDE → output must show the RIGHT SIDE
-- The angle is: "${angle}"
-- DO NOT rotate the car. DO NOT show a different side. SAME ANGLE.
-IF YOU CHANGE THE ANGLE, THE ENTIRE OUTPUT IS REJECTED.
-#####################################################################
+    // 3. Route to open car handling
+    if (["door_open", "trunk_open", "hood_open"].includes(angle)) {
+        return processGenAI(ai, originalBase64, studioImageBase64, branding, `
+            Composite this car into the studio background.
+            CRITICAL: The car doors/hood/trunk are OPEN. You MUST keep them OPEN exactly as they are.
+            1. Segment the car perfectly.
+            2. Place into the studio environment provided.
+            3. Match lighting and shadows.
+            4. Do NOT close the doors or change the car's state.
+            5. Output 4:3 aspect ratio.
+        `);
+    }
 
-== STEP 1: UNDERSTAND INPUTS ==
-- IMAGE 1 = The car photo. ANGLE: ${angle}. Keep this EXACT angle.
-- IMAGE 2 = The studio (white infinity cove with gray floor - USE THIS EXACTLY)
+    // 4. Default Exterior logic
+    const anglePrompt = angle.replace(/_/g, " ");
+    return processGenAI(ai, originalBase64, studioImageBase64, branding, `
+        Composite this car into the provided studio background.
+        Car Angle: ${anglePrompt}.
+        
+        Rules:
+        1. Keep the car geometry, angle, and perspective EXACTLY 1:1.
+        2. Remove the original background completely.
+        3. Place car on the studio floor with realistic contact shadows.
+        4. Remove outdoor reflections from paint and glass; replace with soft studio reflections.
+        5. Neutralize lighting to 6500K studio white.
+        6. Output 4:3 aspect ratio.
+        ${branding?.isEnabled ? "7. Place the provided logo on the license plate area IF visible." : ""}
+    `);
+}
 
-== STEP 2: EXTRACT THE CAR ==
-- Mentally segment the car from Image 1
-- Keep EVERY pixel of the car's shape, angle, position
-- Do NOT modify: scratches, dents, dirt, badges, wheels, glass tint
-
-== STEP 3: PLACE INTO STUDIO ==
-- Put the car into Image 2's environment
-- Match the floor perspective and wall gradient EXACTLY from Image 2
-- Add realistic contact shadow under tires
-- Add subtle floor reflection (not mirror-sharp)
-
-== STEP 4: REMOVE ALL SUNLIGHT (MANDATORY) ==
-Scan the ENTIRE car surface for these and REMOVE them:
-✗ Yellow/warm color cast on any panel
-✗ Hard directional shadows (sun shadows)
-✗ Bright hotspots on hood, roof, or trunk
-✗ Blue sky tint in shadows
-✗ Any lighting that comes from ONE direction
-
-REPLACE WITH:
-✓ Neutral 6500K white balance everywhere
-✓ Soft, even illumination from large overhead softbox
-✓ Gentle gradients, no harsh transitions
-
-== STEP 5: REPLACE ALL REFLECTIONS (MANDATORY) ==
-This is the MOST IMPORTANT step. Scan EVERY reflective surface:
-
-FOR DARK/BLACK PAINT:
-- Look at doors, fenders, hood, trunk lid
-- If you see green (trees), blue (sky), brown (buildings), gray lines (road) → PAINT OVER with white/gray studio gradients
-- The dark paint should show smooth white gradient from studio walls
-
-FOR LIGHT/WHITE/SILVER PAINT:
-- Reflections are subtle but check for color contamination
-- Remove any warm yellow tones that indicate sun
-- Should show neutral gray/white studio tones
-
-FOR GLASS/WINDOWS:
-- Remove any outdoor scenery visible through or reflected in glass
-- Windows should show dark interior or white studio environment
-- No trees, no sky, no buildings
-
-FOR CHROME/TRIM:
-- Remove colorful reflections
-- Should show white/gray studio tones
-
-== STEP 6: FINAL QUALITY CHECK ==
-Before outputting, verify:
-□ Is there ANY green/blue/brown color in the car's reflections? → If yes, go back to Step 5
-□ Is there ANY warm yellow cast on the car? → If yes, go back to Step 4
-□ Does the background match Image 2 exactly? → If no, go back to Step 3
-□ Is the car shape/angle identical to Image 1? → If no, go back to Step 2
-
-== LICENSE PLATE ==
-${hasLogo ? "Replace plate with dealership logo plate." : "Make plate neutral gray/white."}
-
-== OUTPUT ==
-One photorealistic studio image. Return ONLY the image data.
-`.trim();
+/** Generic generation function using Gemini 3 Pro (SDK) */
+async function processGenAI(
+    ai: GoogleGenerativeAI,
+    image1Base64: string,
+    image2Base64: string,
+    branding: { isEnabled?: boolean; logoUrl?: string | null } | undefined,
+    promptText: string
+): Promise<string> {
+    const clean1 = image1Base64.includes(",") ? image1Base64.split(",")[1] : image1Base64;
+    const clean2 = image2Base64.includes(",") ? image2Base64.split(",")[1] : image2Base64;
 
     const parts: any[] = [
-        {
-            inlineData: {
-                data: originalBase64.includes(",") ? originalBase64.split(",")[1] : originalBase64,
-                mimeType: "image/png",
-            },
-        },
-        {
-            inlineData: {
-                data: studioImageBase64.includes(",") ? studioImageBase64.split(",")[1] : studioImageBase64,
-                mimeType: "image/png",
-            },
-        },
+        { inlineData: { data: clean1, mimeType: "image/png" } },
+        { inlineData: { data: clean2, mimeType: "image/png" } },
     ];
 
-    if (hasLogo && branding?.logoUrl) {
-        parts.push({
-            inlineData: {
-                data: branding.logoUrl.includes(",") ? branding.logoUrl.split(",")[1] : branding.logoUrl,
-                mimeType: "image/png",
-            },
+    if (branding?.isEnabled && branding?.logoUrl) {
+        const cleanLogo = branding.logoUrl.includes(",") ? branding.logoUrl.split(",")[1] : branding.logoUrl;
+        parts.push({ inlineData: { data: cleanLogo, mimeType: "image/png" } });
+    }
+
+    parts.push({ text: promptText });
+
+    console.log(`🎨 Generating with ${MODEL_IMAGE}...`);
+    const model = ai.getGenerativeModel({ model: MODEL_IMAGE });
+
+    try {
+        const response = await model.generateContent({
+            contents: [{ role: "user", parts }],
         });
+
+        const candidate = response.response.candidates?.[0];
+        const imagePart = candidate?.content?.parts?.find((p: any) => p.inlineData);
+
+        if (!imagePart?.inlineData?.data) {
+            console.error("No image in response:", JSON.stringify(response.response));
+            throw new Error("AI successfully processed but returned no image data.");
+        }
+
+        return `data:image/png;base64,${imagePart.inlineData.data}`;
+    } catch (err) {
+        console.error("Gemini GenAI Error:", err);
+        throw err;
     }
-
-    parts.push({ text: taskPrompt });
-
-    const response = await ai.models.generateContent({
-        model: MODEL_IMAGE,
-        contents: { parts },
-    });
-
-    const candidate = response.candidates?.[0];
-    const outPart = candidate?.content?.parts?.find((p: any) => p.inlineData?.data);
-
-    if (!outPart?.inlineData?.data) {
-        throw new Error("No image data returned from AI");
-    }
-
-    return `data:image/png;base64,${outPart.inlineData.data}`;
 }

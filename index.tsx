@@ -2,7 +2,12 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
-import App from './App';
+import AppRoutes from './src/Routes';
+
+import { AuthProvider } from './context/AuthContext';
+import { CreditsProvider } from './context/CreditsContext';
+import { ThemeProvider } from './context/ThemeContext';
+import { LanguageProvider } from './context/LanguageContext';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -12,6 +17,14 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <AuthProvider>
+      <CreditsProvider>
+        <ThemeProvider>
+          <LanguageProvider>
+            <AppRoutes />
+          </LanguageProvider>
+        </ThemeProvider>
+      </CreditsProvider>
+    </AuthProvider>
   </React.StrictMode>
 );

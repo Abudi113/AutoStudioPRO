@@ -8,7 +8,11 @@ export type CameraAngle =
   | 'front_right_34'
   | 'rear_left_34'
   | 'rear_right_34'
-  | 'interior';
+  | 'interior'
+  | 'detail'
+  | 'door_open'
+  | 'trunk_open'
+  | 'hood_open';
 
 export interface StudioTemplate {
   id: string;

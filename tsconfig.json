@@ -28,6 +28,8 @@
     "noEmit": true
   },
   "include": [
+    "src/**/*",
+    "components/**/*",
     "**/*.ts",
     "**/*.tsx",
     "env.d.ts"
