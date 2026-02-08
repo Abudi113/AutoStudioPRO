@@ -1,14 +1,64 @@
-
 import React, { useState } from 'react';
 import { Check, CreditCard, Zap } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useLanguage } from '../context/LanguageContext';
+import { loadStripe } from '@stripe/stripe-js';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Stripe with public key from env
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '');
+
+const supabase = createClient(
+    import.meta.env.VITE_SUPABASE_URL,
+    import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
 const PricingPage: React.FC = () => {
     const { t } = useLanguage();
     const [billingCycle, setBillingCycle] = useState<'credits' | 'subscription'>('credits');
     const [customAmount, setCustomAmount] = useState<number | ''>('');
     const [customPrice, setCustomPrice] = useState<string>('-.--');
+    const [loading, setLoading] = useState<string | null>(null);
+
+    // Actual Stripe Price IDs
+    const PRICE_IDS = {
+        basic: 'price_1SydaeIYHtY4sN4xO1Jk9QyF',
+        starter: 'price_1SyedYIYHtY4sN4xxG5QVfMO',
+        professional: 'price_1SyedyIYHtY4sN4x4Dz4wSF8',
+        subscription: 'price_1SyedyIYHtY4sN4x4Dz4wSF8', // Mapping Pro to subscription
+        agency: 'price_agency',
+    };
+
+    const handleCheckout = async (priceId: string) => {
+        setLoading(priceId);
+        try {
+            const { data: { session }, error: authError } = await supabase.auth.getSession();
+            if (authError || !session) {
+                // Redirect to login or show auth modal
+                alert(t('accountRequired') || 'Please login to continue');
+                return;
+            }
+
+            const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+                body: {
+                    priceId,
+                    mode: billingCycle === 'subscription' ? 'subscription' : 'payment',
+                    successUrl: window.location.origin + '/dashboard?success=true',
+                    cancelUrl: window.location.origin + '/pricing'
+                },
+            });
+
+            if (error) throw error;
+            if (data?.url) {
+                window.location.href = data.url;
+            }
+        } catch (error: any) {
+            console.error('Checkout error:', error);
+            alert('Failed to initiate checkout: ' + error.message);
+        } finally {
+            setLoading(null);
+        }
+    };
 
     const calculatePrice = (amount: number) => {
         if (!amount || amount < 20) return '-.--';
@@ -73,19 +123,75 @@ const PricingPage: React.FC = () => {
                             <motion.div
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                className="bg-[var(--card)] border border-[var(--border)] rounded-3xl p-8 flex flex-col shadow-lg"
+                                className="bg-[var(--card)] border border-[var(--border)] rounded-3xl p-8 flex flex-col shadow-lg hover:border-blue-500/50 transition-colors"
                             >
-                                <div className="mb-4">
-                                    <span className="bg-blue-500/10 text-blue-500 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">{t('starter')}</span>
+                                {/* 1. Plan Name */}
+                                <div className="mb-6">
+                                    <h3 className="text-xl font-bold text-[var(--foreground)]">{t('starter')}</h3>
                                 </div>
-                                <h3 className="text-2xl font-bold mb-2 text-[var(--foreground)]">20 {t('credits')}</h3>
-                                <div className="flex items-baseline gap-1 mb-6">
-                                    <span className="text-4xl font-black text-[var(--foreground)]">$19.88</span>
-                                    <span className="text-gray-500 text-sm">{t('incFees')}</span>
+
+                                {/* 2. Big Price */}
+                                <div className="mb-6">
+                                    <div className="flex items-baseline gap-1">
+                                        <span className="text-5xl font-black text-[var(--foreground)]">€149</span>
+                                        <span className="text-gray-500 text-lg">{t('month')}</span>
+                                    </div>
+                                    <p className="text-sm text-gray-400 mt-1">{t('billedMonthly')}</p>
                                 </div>
-                                <p className="text-gray-500 mb-8 flex-1">{t('packStarterDesc')}</p>
-                                <button className="w-full py-4 rounded-xl bg-[var(--background)] hover:bg-black/5 dark:hover:bg-white/5 border border-[var(--border)] font-bold transition-all text-[var(--foreground)]">
-                                    {t('buyCredits')}
+
+                                {/* 3. Credits & Approx */}
+                                <div className="mb-2">
+                                    <div className="text-2xl font-bold text-blue-500 mb-1">
+                                        375 {t('credits')} / {t('month').replace('/', '')}
+                                    </div>
+                                    <div className="text-sm text-gray-500 font-medium">
+                                        {t('approxVehicles').replace('{count}', '10–12')}
+                                    </div>
+                                    <div className="text-xs text-gray-400 mt-1 opacity-70">
+                                        {t('approxVehiclesCalc')}
+                                    </div>
+                                </div>
+
+                                {/* 4. Cost per image */}
+                                <div className="mb-8">
+                                    <div className="inline-block bg-[var(--foreground)]/5 rounded-lg px-3 py-1 text-xs font-bold text-gray-500">
+                                        {t('pricePerImage').replace('{cost}', '€0.40')}
+                                    </div>
+                                </div>
+
+                                {/* 5. Best For */}
+                                <div className="mb-8 p-4 bg-blue-500/5 rounded-xl border border-blue-500/10">
+                                    <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                                        {t('bestFor').replace('{target}', t('packStarterDesc'))}
+                                    </p>
+                                </div>
+
+                                {/* 6. What's Included */}
+                                <ul className="space-y-3 mb-8 flex-1">
+                                    {Object.values(t('featureList') || {}).map((feature: any, i: number) => (
+                                        <li key={i} className="flex items-center gap-3 text-sm text-gray-500 font-medium">
+                                            <div className="w-5 h-5 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
+                                                <Check className="w-3 h-3 text-green-500" />
+                                            </div>
+                                            <span>{feature}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+
+                                {/* 7. CTA */}
+                                <button
+                                    onClick={() => handleCheckout(PRICE_IDS.starter)}
+                                    disabled={loading === PRICE_IDS.starter}
+                                    className="w-full py-4 rounded-xl bg-[var(--background)] hover:bg-black/5 dark:hover:bg-white/5 border border-[var(--border)] font-bold transition-all text-[var(--foreground)] disabled:opacity-50"
+                                >
+                                    {loading === PRICE_IDS.starter ? (
+                                        <div className="flex items-center justify-center gap-2">
+                                            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                            <span>{t('processing')}...</span>
+                                        </div>
+                                    ) : (
+                                        t('getStarted')
+                                    )}
                                 </button>
                             </motion.div>
 
@@ -94,30 +200,77 @@ const PricingPage: React.FC = () => {
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: 0.1 }}
-                                className="bg-[var(--card)] border-2 border-blue-500/30 rounded-3xl p-8 flex flex-col relative overflow-hidden shadow-xl"
+                                className="bg-[var(--card)] border-2 border-blue-600 rounded-3xl p-8 flex flex-col relative overflow-hidden shadow-2xl shadow-blue-900/10 order-first md:order-none transform md:-translate-y-4"
                             >
                                 <div className="absolute top-0 right-0 bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-bl-xl">{t('popular')}</div>
-                                <div className="mb-4">
-                                    <span className="bg-blue-500/10 text-blue-500 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">{t('professional')}</span>
+
+                                {/* 1. Plan Name */}
+                                <div className="mb-6">
+                                    <h3 className="text-xl font-bold text-blue-600">{t('professional')}</h3>
                                 </div>
-                                <h3 className="text-2xl font-bold mb-2 text-[var(--foreground)]">100 {t('credits')}</h3>
-                                <div className="flex items-baseline gap-1 mb-6">
-                                    <span className="text-4xl font-black text-[var(--foreground)]">$81.67</span>
-                                    <span className="text-gray-500 text-sm">{t('incFees')}</span>
+
+                                {/* 2. Big Price */}
+                                <div className="mb-6">
+                                    <div className="flex items-baseline gap-1">
+                                        <span className="text-5xl font-black text-[var(--foreground)]">€299</span>
+                                        <span className="text-gray-500 text-lg">{t('month')}</span>
+                                    </div>
+                                    <p className="text-sm text-gray-400 mt-1">{t('billedMonthly')}</p>
                                 </div>
-                                <p className="text-gray-500 mb-8 flex-1">{t('packProDesc')}</p>
-                                <ul className="space-y-3 mb-8 text-gray-400">
-                                    <li className="flex items-center gap-3">
-                                        <Check className="w-5 h-5 text-blue-500" />
-                                        <span>{t('featureStudioAccess')}</span>
-                                    </li>
-                                    <li className="flex items-center gap-3">
-                                        <Check className="w-5 h-5 text-blue-500" />
-                                        <span>{t('featureHighRes')}</span>
-                                    </li>
+
+                                {/* 3. Credits & Approx */}
+                                <div className="mb-2">
+                                    <div className="text-2xl font-bold text-blue-600 mb-1">
+                                        1000 {t('credits')} / {t('month').replace('/', '')}
+                                    </div>
+                                    <div className="text-sm text-gray-500 font-medium">
+                                        {t('approxVehicles').replace('{count}', '25–30')}
+                                    </div>
+                                    <div className="text-xs text-gray-400 mt-1 opacity-70">
+                                        {t('approxVehiclesCalc')}
+                                    </div>
+                                </div>
+
+                                {/* 4. Cost per image */}
+                                <div className="mb-8">
+                                    <div className="inline-block bg-blue-600 text-white rounded-lg px-3 py-1 text-xs font-bold">
+                                        {t('pricePerImage').replace('{cost}', '€0.30')}
+                                    </div>
+                                </div>
+
+                                {/* 5. Best For */}
+                                <div className="mb-8 p-4 bg-blue-600/10 rounded-xl border border-blue-600/20">
+                                    <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                                        {t('bestFor').replace('{target}', t('packProDesc'))}
+                                    </p>
+                                </div>
+
+                                {/* 6. What's Included */}
+                                <ul className="space-y-3 mb-8 flex-1">
+                                    {Object.values(t('featureList') || {}).map((feature: any, i: number) => (
+                                        <li key={i} className="flex items-center gap-3 text-sm text-[var(--foreground)] font-bold">
+                                            <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center shrink-0">
+                                                <Check className="w-3 h-3 text-white" />
+                                            </div>
+                                            <span>{feature}</span>
+                                        </li>
+                                    ))}
                                 </ul>
-                                <button className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-700 font-bold transition-all shadow-lg shadow-blue-500/25 text-white">
-                                    {t('buyCredits')}
+
+                                {/* 7. CTA */}
+                                <button
+                                    onClick={() => handleCheckout(PRICE_IDS.professional)}
+                                    disabled={loading === PRICE_IDS.professional}
+                                    className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-700 font-bold transition-all shadow-lg shadow-blue-500/25 text-white disabled:opacity-50"
+                                >
+                                    {loading === PRICE_IDS.professional ? (
+                                        <div className="flex items-center justify-center gap-2">
+                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                            <span>{t('processing')}...</span>
+                                        </div>
+                                    ) : (
+                                        t('getStarted')
+                                    )}
                                 </button>
                             </motion.div>
 
@@ -126,19 +279,75 @@ const PricingPage: React.FC = () => {
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: 0.2 }}
-                                className="bg-[var(--card)] border border-[var(--border)] rounded-3xl p-8 flex flex-col shadow-lg"
+                                className="bg-[var(--card)] border border-[var(--border)] rounded-3xl p-8 flex flex-col shadow-lg hover:border-blue-500/50 transition-colors"
                             >
-                                <div className="mb-4">
-                                    <span className="bg-blue-500/10 text-blue-500 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">{t('agency')}</span>
+                                {/* 1. Plan Name */}
+                                <div className="mb-6">
+                                    <h3 className="text-xl font-bold text-[var(--foreground)]">{t('agency')}</h3>
                                 </div>
-                                <h3 className="text-2xl font-bold mb-2 text-[var(--foreground)]">500 {t('credits')}</h3>
-                                <div className="flex items-baseline gap-1 mb-6">
-                                    <span className="text-4xl font-black text-[var(--foreground)]">$308.24</span>
-                                    <span className="text-gray-500 text-sm">{t('incFees')}</span>
+
+                                {/* 2. Big Price */}
+                                <div className="mb-6">
+                                    <div className="flex items-baseline gap-1">
+                                        <span className="text-5xl font-black text-[var(--foreground)]">€599</span>
+                                        <span className="text-gray-500 text-lg">{t('month')}</span>
+                                    </div>
+                                    <p className="text-sm text-gray-400 mt-1">{t('billedMonthly')}</p>
                                 </div>
-                                <p className="text-gray-500 mb-8 flex-1">{t('packAgencyDesc')}</p>
-                                <button className="w-full py-4 rounded-xl bg-[var(--background)] hover:bg-black/5 dark:hover:bg-white/5 border border-[var(--border)] font-bold transition-all text-[var(--foreground)]">
-                                    {t('buyCredits')}
+
+                                {/* 3. Credits & Approx */}
+                                <div className="mb-2">
+                                    <div className="text-2xl font-bold text-blue-500 mb-1">
+                                        2500 {t('credits')} / {t('month').replace('/', '')}
+                                    </div>
+                                    <div className="text-sm text-gray-500 font-medium">
+                                        {t('approxVehicles').replace('{count}', '70–80')}
+                                    </div>
+                                    <div className="text-xs text-gray-400 mt-1 opacity-70">
+                                        {t('approxVehiclesCalc')}
+                                    </div>
+                                </div>
+
+                                {/* 4. Cost per image */}
+                                <div className="mb-8">
+                                    <div className="inline-block bg-[var(--foreground)]/5 rounded-lg px-3 py-1 text-xs font-bold text-gray-500">
+                                        {t('pricePerImage').replace('{cost}', '€0.24')}
+                                    </div>
+                                </div>
+
+                                {/* 5. Best For */}
+                                <div className="mb-8 p-4 bg-blue-500/5 rounded-xl border border-blue-500/10">
+                                    <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                                        {t('bestFor').replace('{target}', t('packAgencyDesc'))}
+                                    </p>
+                                </div>
+
+                                {/* 6. What's Included */}
+                                <ul className="space-y-3 mb-8 flex-1">
+                                    {Object.values(t('featureList') || {}).map((feature: any, i: number) => (
+                                        <li key={i} className="flex items-center gap-3 text-sm text-gray-500 font-medium">
+                                            <div className="w-5 h-5 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
+                                                <Check className="w-3 h-3 text-green-500" />
+                                            </div>
+                                            <span>{feature}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+
+                                {/* 7. CTA */}
+                                <button
+                                    onClick={() => handleCheckout(PRICE_IDS.agency)}
+                                    disabled={loading === PRICE_IDS.agency}
+                                    className="w-full py-4 rounded-xl bg-[var(--background)] hover:bg-black/5 dark:hover:bg-white/5 border border-[var(--border)] font-bold transition-all text-[var(--foreground)] disabled:opacity-50"
+                                >
+                                    {loading === PRICE_IDS.agency ? (
+                                        <div className="flex items-center justify-center gap-2">
+                                            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                            <span>{t('processing')}...</span>
+                                        </div>
+                                    ) : (
+                                        t('getStarted')
+                                    )}
                                 </button>
                             </motion.div>
 
@@ -168,7 +377,10 @@ const PricingPage: React.FC = () => {
                                     <div className="text-sm text-gray-500 uppercase font-bold">{t('estPrice')}</div>
                                     <div className="text-2xl font-black text-blue-400">{customPrice}</div>
                                 </div>
-                                <button className="px-8 py-4 rounded-xl bg-[var(--background)] hover:bg-black/5 dark:hover:bg-white/5 font-bold transition-all border border-[var(--border)] text-[var(--foreground)]">
+                                <button
+                                    onClick={() => alert('Custom credit purchase coming soon!')}
+                                    className="px-8 py-4 rounded-xl bg-[var(--background)] hover:bg-black/5 dark:hover:bg-white/5 font-bold transition-all border border-[var(--border)] text-[var(--foreground)]"
+                                >
                                     {t('buyCredits')}
                                 </button>
                             </motion.div>
@@ -213,8 +425,19 @@ const PricingPage: React.FC = () => {
                                         ))}
                                     </div>
 
-                                    <button className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-700 font-bold text-lg transition-all shadow-xl shadow-blue-500/20 text-white">
-                                        {t('startSub')}
+                                    <button
+                                        onClick={() => handleCheckout(PRICE_IDS.subscription)}
+                                        disabled={loading === PRICE_IDS.subscription}
+                                        className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-700 font-bold text-lg transition-all shadow-xl shadow-blue-500/20 text-white disabled:opacity-50"
+                                    >
+                                        {loading === PRICE_IDS.subscription ? (
+                                            <div className="flex items-center justify-center gap-2">
+                                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                                <span>{t('processing')}...</span>
+                                            </div>
+                                        ) : (
+                                            t('startSub')
+                                        )}
                                     </button>
                                 </motion.div>
                             </div>

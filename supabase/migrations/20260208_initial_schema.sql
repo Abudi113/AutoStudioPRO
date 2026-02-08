@@ -4,7 +4,7 @@ create table public.profiles (
   id uuid not null references auth.users on delete cascade,
   email text,
   credits integer default 5,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  created_at timestamp with time zone default now() not null,
   primary key (id)
 );
 

@@ -11,7 +11,7 @@ create table if not exists public.profiles (
   credits_purchased_expiry timestamp with time zone default (now() + interval '10 years'),
   subscription_tier text default 'free',
   last_refill_date timestamp with time zone,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  created_at timestamp with time zone default now() not null,
   primary key (id)
 );
 
