@@ -57,6 +57,7 @@ serve(async (req) => {
             client_reference_id: user.id,
             metadata: {
                 userId: user.id,
+                priceId: priceId,
             }
         });
 

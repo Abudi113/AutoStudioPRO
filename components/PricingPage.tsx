@@ -26,16 +26,23 @@ const PricingPage: React.FC = () => {
         starter: 'price_1SyedYIYHtY4sN4xxG5QVfMO',
         professional: 'price_1SyedyIYHtY4sN4x4Dz4wSF8',
         subscription: 'price_1SyedyIYHtY4sN4x4Dz4wSF8', // Mapping Pro to subscription
-        agency: 'price_agency',
+        agency: 'price_agency', // Placeholder - requires real Stripe Price ID
     };
 
     const handleCheckout = async (priceId: string) => {
         setLoading(priceId);
         try {
+            if (priceId === 'price_agency') {
+                alert('The Agency plan is currently being finalized. Please contact sales for more information.');
+                setLoading(null);
+                return;
+            }
+
             const { data: { session }, error: authError } = await supabase.auth.getSession();
             if (authError || !session) {
                 // Redirect to login or show auth modal
                 alert(t('accountRequired') || 'Please login to continue');
+                setLoading(null);
                 return;
             }
 
