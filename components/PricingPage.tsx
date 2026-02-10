@@ -3,15 +3,13 @@ import { Check, CreditCard, Zap } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useLanguage } from '../context/LanguageContext';
 import { loadStripe } from '@stripe/stripe-js';
-import { createClient } from '@supabase/supabase-js';
+
 
 // Initialize Stripe with public key from env
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '');
 
-const supabase = createClient(
-    import.meta.env.VITE_SUPABASE_URL,
-    import.meta.env.VITE_SUPABASE_ANON_KEY
-);
+import { supabase } from '../services/supabaseClient';
+
 
 const PricingPage: React.FC = () => {
     const { t } = useLanguage();

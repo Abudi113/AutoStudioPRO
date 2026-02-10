@@ -1,14 +1,12 @@
-
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import Stripe from "https://esm.sh/stripe@14.14.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import Stripe from "npm:stripe@14.14.0";
 
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-serve(async (req) => {
+Deno.serve(async (req) => {
     if (req.method === "OPTIONS") {
         return new Response("ok", { headers: corsHeaders });
     }
@@ -17,17 +15,14 @@ serve(async (req) => {
         const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
         if (!stripeKey) throw new Error("Missing STRIPE_SECRET_KEY");
 
-        const supabaseUrl = Deno.env.get("SUPABASE_URL");
-        const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
-
-        if (!supabaseUrl || !supabaseAnonKey) throw new Error("Missing Supabase configuration");
-
         const authHeader = req.headers.get("Authorization");
         if (!authHeader) throw new Error("Missing Authorization header");
 
-        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-            global: { headers: { Authorization: authHeader } },
-        });
+        const supabase = createClient(
+            Deno.env.get("SUPABASE_URL") ?? "",
+            Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+            { global: { headers: { Authorization: authHeader } } }
+        );
 
         const { data: { user }, error: userError } = await supabase.auth.getUser();
         if (userError || !user) throw new Error("Invalid user session");
@@ -37,20 +32,14 @@ serve(async (req) => {
             httpClient: Stripe.createFetchHttpClient(),
         });
 
-        const { priceId, mode = "payment", quantity = 1, successUrl, cancelUrl } = await req.json();
-
+        const { priceId, mode = "payment", successUrl, cancelUrl } = await req.json();
         if (!priceId) throw new Error("Missing priceId");
 
         console.log(`Creating ${mode} session for user ${user.id} and price ${priceId}`);
 
         const session = await stripe.checkout.sessions.create({
-            line_items: [
-                {
-                    price: priceId,
-                    quantity: quantity,
-                },
-            ],
-            mode: mode,
+            line_items: [{ price: priceId, quantity: 1 }],
+            mode: mode as any,
             success_url: successUrl || `${req.headers.get("origin")}/dashboard?success=true`,
             cancel_url: cancelUrl || `${req.headers.get("origin")}/pricing`,
             customer_email: user.email,
@@ -66,10 +55,11 @@ serve(async (req) => {
         });
 
     } catch (error) {
-        console.error(error);
+        console.error("Checkout Error:", error.message);
         return new Response(JSON.stringify({ error: error.message }), {
             status: 400,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
     }
 });
+

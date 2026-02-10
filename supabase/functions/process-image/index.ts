@@ -71,36 +71,37 @@ You must classify the input image into exactly ONE of the following categories:
 - EXTERIOR_CAR
 - INTERIOR_CAR
 - DETAIL_CAR
+- DOOR_OPEN (Priority: Any car door is visibly open)
+- TRUNK_OPEN (Priority: Trunk, tailgate, or boot is open)
+- HOOD_OPEN (Priority: Hood/bonnet is open)
 - OTHER
 
 DEFINITIONS:
-- EXTERIOR_CAR: The outside of a vehicle is visible (body, doors, wheels, mirrors, headlights, exterior panels).
-- INTERIOR_CAR: The inside of a vehicle is visible (seats, dashboard, steering wheel, center console, interior trim).
-- DETAIL_CAR: Close-up or partial view of a vehicle component (wheel, headlight, badge, seat detail).
-- OTHER: Image does not clearly show a vehicle interior or exterior.
+- EXTERIOR_CAR: The outside of a vehicle is visible and fully closed.
+- INTERIOR_CAR: The inside of a vehicle is visible from the driver/passenger perspective.
+- DETAIL_CAR: Close-up of a component (wheel, badge, headlight).
+- DOOR_OPEN: A vehicle door is physically open, showing both exterior and partial interior.
+- TRUNK_OPEN: The rear hatch or trunk is open.
+- HOOD_OPEN: The engine bay is exposed via an open hood.
+- OTHER: Not a vehicle.
 
 STRICT RULES:
+- PRIORITIZE "OPEN" categories if any component is open.
 - Return ONLY valid JSON.
 - Do NOT describe the image.
-- Do NOT explain your decision.
-- Do NOT suggest edits, enhancements, or generation.
-- Do NOT mention lighting, studio, background, or quality.
-- Do NOT assume context beyond what is visually dominant.
 
 OUTPUT FORMAT (JSON ONLY):
 {
-  "category": "EXTERIOR_CAR | INTERIOR_CAR | DETAIL_CAR | OTHER",
+  "category": "EXTERIOR_CAR | INTERIOR_CAR | DETAIL_CAR | DOOR_OPEN | TRUNK_OPEN | HOOD_OPEN | OTHER",
   "confidence": 0.00
 }
 
-CONFIDENCE RULE:
-- confidence = how visually dominant the category is in the image
-- Use values between 0.00 and 1.00
-
 FINAL CHECK:
-- If the steering wheel, dashboard, or seats dominate → INTERIOR_CAR
-- If the vehicle body or wheels dominate → EXTERIOR_CAR
-- If unsure → use DETAIL_CAR or OTHER`;
+- If a door is open → DOOR_OPEN
+- If the trunk is open → TRUNK_OPEN
+- If the hood is open → HOOD_OPEN
+- If the steering wheel dominates → INTERIOR_CAR
+- If the vehicle body dominates and is closed → EXTERIOR_CAR`;
 
     try {
         const cleanBase64 = base64Image.includes(",") ? base64Image.split(",")[1] : base64Image;
@@ -151,47 +152,69 @@ async function processCarImage(
     // 1. Route to specialized interior handling
     if (angle === "INTERIOR_CAR" || angle === "interior" || taskType === "interior") {
         return processGenAI(ai, originalBase64, studioImageBase64, branding, `
-            Retouch this car interior. 
-            Rules:
-            1. CRITICAL: Keep camera angle, frame, and perspective EXACTLY 1:1 with the original. Any change is a FAILURE.
-            2. Remove all outdoor reflections from windows/screens.
-            3. Fix lighting to be soft neutral studio lighting.
-            4. If windows show outside, replace view with the provided studio background.
-            5. If no windows are visible (or full interior shot), do NOT replace the background.
-            6. Output 4:3 aspect ratio.
-            7. The output must overlap perfectly with the original image.
+            ROLE: AI IMAGE EXECUTION ENGINE (Master Retoucher)
+            TASK: Precise Interior Enhancment & Rendering
+
+            INPUTS: Image 1 (Car Interior), Image 2 (Studio Environment/Window View).
+
+            STRICT EXECUTION RULES:
+            1. PIXEL LOCK: Keep camera angle, frame, dashboard geometry, and steering wheel perspective EXACTLY 1:1 with the original. Any alteration to the car's structures is a CRITICAL FAILURE.
+            2. LIGHTING NEUTRALIZATION: Remove all direct sunlight patches, sunbeams, and harsh directional shadows. Replace with soft, diffuse, 6500K neutral studio ambience.
+            3. REFLECTION ERASURE: Erase all outdoor reflections from infotainment screens, digital clusters, piano black trim, and mirrors. Replace with clean studio gradients or solid blacks.
+            4. WINDOW TREATMENT: Replace all visible outdoor scenery through windows with the provided Studio Environment (Image 2).
+            5. GEOMETRY FIXATION: Do NOT "complete" the image or hallucinate unseen parts. If a component is cut off by the frame, it must stay cut off.
+            6. OUTPUT SPEC: 4:3 Aspect Ratio.
+            7. FAITHFULNESS: Every button, stitch, and trim pattern must remain IDENTICAL to the original.
+
+            GOAL: A perfectly clean, studio-lit version of the original cabin.
+
         `);
     }
 
     // 2. Route to detail handling
     if (angle === "DETAIL_CAR" || angle === "detail") {
         return processGenAI(ai, originalBase64, studioImageBase64, branding, `
-            Composite this car detail shot into the studio.
-            Rules:
-            1. CRITICAL: Keep object geometry, angle, and perspective EXACTLY 1:1. Any shift in view is a FAILURE.
-            2. Replace background with the provided studio environment.
-            3. Remove harsh shadows and reflections.
-            4. Output 4:3 aspect ratio.
-            5. The result must look distinctively like the original photo, just with a studio background.
+            ROLE: AI IMAGE EXECUTION ENGINE (Master Compositor)
+            TASK: Precise Detail Shot Background Replacement
+
+            INPUTS: Image 1 (Car Detail/Component), Image 2 (Studio Background).
+
+            STRICT EXECUTION RULES:
+            1. PIXEL LOCK: Keep object geometry, viewing angle, and perspective EXACTLY 1:1. The component must not rotate or shift.
+            2. IDENTITY PRESERVATION: Maintain every detail of the original component (texture, wear, imperfections).
+            3. STUDIO COMPOSITING: Replace the background with the provided Studio Environment (Image 2).
+            4. LIGHTING: Remove harsh outdoor shadows and sunlight. Use soft, diffuse studio lighting.
+            5. OUTPUT SPEC: 4:3 Aspect Ratio.
+
+            GOAL: The original component, untouched, placed in a premium studio setting.
         `);
     }
 
-    // 3. Default Exterior logic (covers EXTERIOR_CAR, OTHER, and older keys)
+    // 4. Default Exterior logic (FULL GENERATION PIPELINE)
     const anglePrompt = angle.replace(/_/g, " ").replace("CAR", "").trim();
+
     return processGenAI(ai, originalBase64, studioImageBase64, branding, `
-        Composite this car into the provided studio background.
-        Car View: ${anglePrompt}.
-        
-        Rules:
-        1. CRITICAL: Keep the car geometry, angle, and perspective EXACTLY 1:1. Any rotation or camera move is a FAILURE.
-        2. DAMAGED CARS: CRITICAL - PRESERVE ALL DAMAGE, RUST, DENTS, SCRATCHES, AND IMPERFECTIONS EXACTLY AS THEY ARE. DO NOT REPAIR THE VEHICLE.
-        3. Remove the original background completely.
-        4. Place car on the studio floor with realistic contact shadows.
-        5. Remove outdoor reflections from paint and glass; replace with soft studio reflections.
-        6. LIGHTING: Neutralize all sunlight and harsh shadows. Use soft, diffuse 6500K studio white lighting.
-        7. Output 4:3 aspect ratio.
-        ${branding?.isEnabled ? "8. Place the provided logo on the top left and on the the centre of the license plate area IF visible." : ""}
-        9. The car must look IDENTICAL to the original file (including any damage), merely transported to a studio.
+        ROLE: AI IMAGE EXECUTION ENGINE (Professional Studio Retoucher)
+        TASK: Deep Photo Retouching & Background Replacement (Tripod Locked)
+
+        INPUTS:
+        - RAW_FILE: Image 1 (Car). This is the "Base Layer".
+        - STUDIO_PLATE: Image 2 (Studio Background). This is the "Background Layer".
+
+        STRICT EDITING RULES:
+        1. "TRIPOD LOCK": The camera MUST NOT MOVE. The car's geometry, angle, and perspective must be IDENTICAL to the RAW_FILE.
+        2. "MASK & COMPOSE": Mask the car from Image 1. Place it into Image 2.
+        3. "LIGHTING MATCH": Adjust the car's lighting to match the soft, white studio lights of Image 2.
+        4. "REFLECTION CLEANUP": Remove trees/buildings from the car's reflections. Replace them with the white studio walls.
+        5. "SHADOW CASTING": Cast a realistic shadow on the floor of Image 2.
+
+        VERIFICATION:
+        - If the car angle changes -> FAIL.
+        - If the car looks like a cartoon -> FAIL.
+        - If the background is not Image 2 -> FAIL.
+
+        OUTPUT: High-fidelity photo-composite. 4:3 Aspect Ratio.
+        ${branding?.isEnabled ? "BRANDING: Place the logo on the top left." : ""}
     `);
 }
 
@@ -199,17 +222,20 @@ async function processCarImage(
 async function processGenAI(
     ai: GoogleGenerativeAI,
     image1Base64: string,
-    image2Base64: string,
+    image2Base64: string | null,
     branding: { isEnabled?: boolean; logoUrl?: string | null } | undefined,
     promptText: string
 ): Promise<string> {
     const clean1 = image1Base64.includes(",") ? image1Base64.split(",")[1] : image1Base64;
-    const clean2 = image2Base64.includes(",") ? image2Base64.split(",")[1] : image2Base64;
 
     const parts: any[] = [
-        { inlineData: { data: clean1, mimeType: "image/png" } },
-        { inlineData: { data: clean2, mimeType: "image/png" } },
+        { inlineData: { data: clean1, mimeType: "image/png" } }
     ];
+
+    if (image2Base64) {
+        const clean2 = image2Base64.includes(",") ? image2Base64.split(",")[1] : image2Base64;
+        parts.push({ inlineData: { data: clean2, mimeType: "image/png" } });
+    }
 
     if (branding?.isEnabled && branding?.logoUrl) {
         const cleanLogo = branding.logoUrl.includes(",") ? branding.logoUrl.split(",")[1] : branding.logoUrl;
