@@ -10,16 +10,53 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
+const STORAGE_KEY = 'carveo-lang';
+const GERMAN_DEFAULT_COUNTRIES = new Set(['DE', 'AT', 'LI']);
+
+const parseLocale = (locale: string): { language: string; country?: string } => {
+    const normalized = locale.replace('_', '-').trim();
+    const [language = '', country] = normalized.split('-');
+    return { language: language.toLowerCase(), country: country?.toUpperCase() };
+};
+
+const detectDefaultLanguage = (): Language => {
+    if (typeof navigator === 'undefined') {
+        return 'en';
+    }
+
+    const browserLocales = navigator.languages?.length ? navigator.languages : [navigator.language];
+
+    for (const locale of browserLocales) {
+        const { country } = parseLocale(locale);
+        if (country && GERMAN_DEFAULT_COUNTRIES.has(country)) {
+            return 'de';
+        }
+    }
+
+    // Fallback: if country is missing but browser preference is German, default to German.
+    for (const locale of browserLocales) {
+        const { language } = parseLocale(locale);
+        if (language === 'de') {
+            return 'de';
+        }
+    }
+
+    return 'en';
+};
+
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [language, setLanguage] = useState<Language>(() => {
-        const saved = localStorage.getItem('carveo-lang');
-        return (saved as Language) || 'en';
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved === 'de' || saved === 'en') {
+            return saved;
+        }
+
+        return detectDefaultLanguage();
     });
 
     useEffect(() => {
-        localStorage.setItem('carveo-lang', language);
-        // Handle RTL for Arabic
-        document.dir = language === 'ar' ? 'rtl' : 'ltr';
+        localStorage.setItem(STORAGE_KEY, language);
+        document.dir = 'ltr';
     }, [language]);
 
     const t = (key: keyof typeof translations['en']): string => {

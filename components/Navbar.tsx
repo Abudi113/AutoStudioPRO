@@ -1,30 +1,52 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Camera, Sun, Moon, LogOut, User, Menu, X, Globe, CreditCard, LayoutDashboard } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCredits } from '../context/CreditsContext';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
-import AuthModal from './AuthModal';
 import VaultModal from './VaultModal';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Navbar: React.FC = () => {
-    const { user, signIn, signOut } = useAuth();
+    const { user, signOut } = useAuth();
     const { totalCredits } = useCredits();
     const { theme, toggleTheme } = useTheme();
     const { language, setLanguage, t } = useLanguage();
     const [isOpen, setIsOpen] = useState(false);
     const [isLangOpen, setIsLangOpen] = useState(false);
     const [showVault, setShowVault] = useState(false);
-    const [showAuthModal, setShowAuthModal] = useState(false);
     const location = useLocation();
+
+    // Handle hash navigation on mount
+    useEffect(() => {
+        if (location.hash) {
+            setTimeout(() => {
+                const id = location.hash.replace('#', '');
+                const element = document.getElementById(id);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'auto', block: 'start' });
+                }
+            }, 0);
+        }
+    }, [location]);
 
     const isActive = (path: string) => location.pathname === path;
 
+    const handleHowItWorksClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+        if (location.pathname === '/') {
+            e.preventDefault();
+            const element = document.getElementById('how-it-works');
+            if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+    };
+
     const navLinks = [
         { name: t('home'), path: '/' },
-        { name: t('pricing'), path: '/pricing' },
+        { name: t('howItWorks'), path: '/#how-it-works', onClick: handleHowItWorksClick },
+        { name: t('aboutUs'), path: '/about' },
         { name: t('contact'), path: '/contact' },
     ];
 
@@ -37,45 +59,52 @@ const Navbar: React.FC = () => {
         <>
             <nav className="fixed top-0 left-0 right-0 z-50 bg-[var(--background)]/80 backdrop-blur-md border-b border-[var(--border)] transition-colors duration-300">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex items-center justify-between h-16">
+                    <div className="flex items-center justify-between h-20">
                         {/* Logo */}
-                        <Link to="/" className="flex items-center gap-2">
-                            <Camera className="w-8 h-8 text-blue-500" />
-                            <span className="text-xl font-bold tracking-wider bg-gradient-to-r from-blue-500 to-blue-400 bg-clip-text text-transparent">CARVEO</span>
+                        <Link to="/" className="flex items-center gap-3">
+                            <Camera className="w-10 h-10 text-blue-500" />
+                            <span className="text-2xl font-bold tracking-wider bg-gradient-to-r from-blue-500 to-blue-400 bg-clip-text text-transparent">CARVEO</span>
                         </Link>
 
                         {/* Desktop Navigation */}
-                        <div className="hidden md:flex items-center gap-6">
-                            {navLinks.map((link) => (
-                                <Link
-                                    key={link.name}
-                                    to={link.path}
-                                    className={`text-sm font-medium transition-colors hover:text-blue-500 ${isActive(link.path) ? 'text-blue-500' : 'opacity-70'}`}
-                                >
-                                    {link.name}
-                                </Link>
-                            ))}
+                        <div className="hidden md:flex items-center gap-8">
+                            {navLinks.map((link) => {
+                                // Links with hashes (like /#how-it-works) should never be marked as active
+                                const hasHash = link.path.includes('#');
+                                const isLinkActive = !hasHash && isActive(link.path);
+
+                                return (
+                                    <Link
+                                        key={link.name}
+                                        to={link.path}
+                                        onClick={(link as any).onClick}
+                                        className={`text-base font-medium transition-colors hover:text-blue-500 ${isLinkActive ? 'text-blue-500' : 'opacity-70'}`}
+                                    >
+                                        {link.name}
+                                    </Link>
+                                );
+                            })}
                         </div>
 
                         {/* Desktop Actions */}
-                        <div className="hidden md:flex items-center gap-4">
+                        <div className="hidden md:flex items-center gap-5">
                             {/* Theme Toggle */}
                             <button
                                 onClick={toggleTheme}
-                                className="p-2 rounded-lg hover:bg-gray-500/10 transition-colors"
+                                className="p-2.5 rounded-lg hover:bg-gray-500/10 transition-colors"
                                 title={theme === 'dark' ? t('lightMode') : t('darkMode')}
                             >
-                                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                                {theme === 'dark' ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}
                             </button>
 
                             {/* Language Selector */}
                             <div className="relative">
                                 <button
                                     onClick={() => setIsLangOpen(!isLangOpen)}
-                                    className="flex items-center gap-1.5 p-2 rounded-lg hover:bg-gray-500/10 transition-colors"
+                                    className="flex items-center gap-2 p-2.5 rounded-lg hover:bg-gray-500/10 transition-colors"
                                 >
-                                    <Globe className="w-5 h-5" />
-                                    <span className="text-xs uppercase font-bold">{language}</span>
+                                    <Globe className="w-6 h-6" />
+                                    <span className="text-sm uppercase font-bold">{language}</span>
                                 </button>
                                 <AnimatePresence>
                                     {isLangOpen && (
@@ -92,7 +121,7 @@ const Navbar: React.FC = () => {
                                                         setLanguage(lang.code as any);
                                                         setIsLangOpen(false);
                                                     }}
-                                                    className={`flex items-center gap-3 w-full px-4 py-2 text-sm text-left hover:bg-blue-500/10 transition-colors ${language === lang.code ? 'text-blue-500 font-bold' : ''}`}
+                                                    className={`flex items-center gap-3 w-full px-4 py-2.5 text-base text-left hover:bg-blue-500/10 transition-colors ${language === lang.code ? 'text-blue-500 font-bold' : ''}`}
                                                 >
                                                     <span>{lang.flag}</span>
                                                     {lang.name}
@@ -108,28 +137,28 @@ const Navbar: React.FC = () => {
                             {user ? (
                                 <>
                                     <Link to="/create">
-                                        <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors hover:text-blue-500">
-                                            <LayoutDashboard className="w-4 h-4" />
+                                        <button className="flex items-center gap-2 px-5 py-2.5 text-base font-medium transition-colors hover:text-blue-500">
+                                            <LayoutDashboard className="w-5 h-5" />
                                             {t('dashboard')}
                                         </button>
                                     </Link>
                                     <button
                                         onClick={() => setShowVault(true)}
-                                        className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 rounded-full border border-blue-500/20 hover:bg-blue-500/20 transition-colors cursor-pointer"
+                                        className="flex items-center gap-2 px-4 py-2 bg-blue-500/10 rounded-full border border-blue-500/20 hover:bg-blue-500/20 transition-colors cursor-pointer"
                                     >
-                                        <CreditCard className="w-3.5 h-3.5 text-blue-500" />
-                                        <span className="text-xs font-bold text-blue-500">{totalCredits}</span>
+                                        <CreditCard className="w-4 h-4 text-blue-500" />
+                                        <span className="text-sm font-bold text-blue-500">{totalCredits}</span>
                                     </button>
                                     <div className="h-6 w-px bg-[var(--border)] mx-2" />
                                     <div className="relative group">
-                                        <button className="p-2 rounded-full hover:bg-gray-500/10 transition-colors">
-                                            <User className="w-5 h-5" />
+                                        <button className="p-2.5 rounded-full hover:bg-gray-500/10 transition-colors">
+                                            <User className="w-6 h-6" />
                                         </button>
                                         <div className="absolute right-0 mt-2 w-48 bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 transform origin-top-right">
                                             <div className="py-2">
                                                 <button
                                                     onClick={() => signOut()}
-                                                    className="block w-full text-left px-4 py-2 text-sm hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                                                    className="block w-full text-left px-4 py-2.5 text-base hover:bg-red-500/10 hover:text-red-500 transition-colors"
                                                 >
                                                     {t('signOut')}
                                                 </button>
@@ -138,20 +167,12 @@ const Navbar: React.FC = () => {
                                     </div>
                                 </>
                             ) : (
-                                <>
-                                    <button
-                                        onClick={() => setShowAuthModal(true)}
-                                        className="text-sm font-medium hover:text-blue-500 transition-colors"
-                                    >
-                                        {t('login')}
-                                    </button>
-                                    <Link
-                                        to="/create"
-                                        className="px-5 py-2 text-sm font-bold text-white bg-blue-600 rounded-full hover:bg-blue-700 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/20"
-                                    >
-                                        {t('getStartedFree')}
-                                    </Link>
-                                </>
+                                <Link
+                                    to="/contact"
+                                    className="px-6 py-2.5 text-base font-bold text-white bg-blue-600 rounded-full hover:bg-blue-700 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/20"
+                                >
+                                    {t('demoRequestCta')}
+                                </Link>
                             )}
                         </div>
 
@@ -159,15 +180,15 @@ const Navbar: React.FC = () => {
                         <div className="md:hidden flex items-center gap-2">
                             <button
                                 onClick={toggleTheme}
-                                className="p-2 rounded-lg hover:bg-gray-500/10 transition-colors"
+                                className="p-2.5 rounded-lg hover:bg-gray-500/10 transition-colors"
                             >
-                                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                                {theme === 'dark' ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}
                             </button>
                             <button
                                 onClick={() => setIsOpen(!isOpen)}
-                                className="p-2 transition-colors overflow-hidden"
+                                className="p-2.5 transition-colors overflow-hidden"
                             >
-                                {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+                                {isOpen ? <X className="w-7 h-7" /> : <Menu className="w-7 h-7" />}
                             </button>
                         </div>
                     </div>
@@ -183,16 +204,27 @@ const Navbar: React.FC = () => {
                             className="md:hidden bg-[var(--card)] border-b border-[var(--border)] overflow-hidden"
                         >
                             <div className="px-4 pt-2 pb-6 space-y-2">
-                                {navLinks.map((link) => (
-                                    <Link
-                                        key={link.name}
-                                        to={link.path}
-                                        onClick={() => setIsOpen(false)}
-                                        className={`block px-3 py-2 text-base font-medium rounded-xl hover:bg-blue-500/10 transition-colors ${isActive(link.path) ? 'text-blue-500 bg-blue-500/10' : ''}`}
-                                    >
-                                        {link.name}
-                                    </Link>
-                                ))}
+                                {navLinks.map((link) => {
+                                    // Links with hashes (like /#how-it-works) should never be marked as active
+                                    const hasHash = link.path.includes('#');
+                                    const isLinkActive = !hasHash && isActive(link.path);
+
+                                    return (
+                                        <Link
+                                            key={link.name}
+                                            to={link.path}
+                                            onClick={(e) => {
+                                                if ((link as any).onClick) {
+                                                    (link as any).onClick(e);
+                                                }
+                                                setIsOpen(false);
+                                            }}
+                                            className={`block px-3 py-2 text-base font-medium rounded-xl hover:bg-blue-500/10 transition-colors ${isLinkActive ? 'text-blue-500 bg-blue-500/10' : ''}`}
+                                        >
+                                            {link.name}
+                                        </Link>
+                                    );
+                                })}
 
                                 <div className="border-t border-[var(--border)] my-4 pt-4 space-y-4">
                                     <div className="flex items-center justify-between px-3">
@@ -233,18 +265,12 @@ const Navbar: React.FC = () => {
                                         </>
                                     ) : (
                                         <div className="flex flex-col gap-3 px-3">
-                                            <button
-                                                onClick={() => { setShowAuthModal(true); setIsOpen(false); }}
-                                                className="w-full py-3 text-center text-sm font-bold border border-[var(--border)] rounded-full hover:bg-gray-500/5 transition-colors"
-                                            >
-                                                {t('login')}
-                                            </button>
                                             <Link
-                                                to="/create"
+                                                to="/contact"
                                                 onClick={() => setIsOpen(false)}
                                                 className="w-full py-3 text-center text-sm font-bold text-white bg-blue-600 rounded-full hover:bg-blue-700 transition-colors"
                                             >
-                                                {t('getStartedFree')}
+                                                {t('demoRequestCta')}
                                             </Link>
                                         </div>
                                     )}
@@ -257,12 +283,6 @@ const Navbar: React.FC = () => {
             </nav>
 
             <VaultModal isOpen={showVault} onClose={() => setShowVault(false)} />
-            <AuthModal
-                isOpen={showAuthModal}
-                onClose={() => setShowAuthModal(false)}
-                title={t('authTitle')}
-                description={t('authDesc')}
-            />
         </>
     );
 };

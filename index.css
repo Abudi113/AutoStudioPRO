@@ -15,7 +15,7 @@
   --primary: #0066FF;
 }
 
-/* Dark Mode - Default */
+/* Dark Mode */
 html.dark {
   --background: #000000;
   --foreground: #ffffff;
@@ -24,7 +24,7 @@ html.dark {
   color-scheme: dark;
 }
 
-/* Light Mode */
+/* Light Mode - Default */
 html.light {
   --background: #ffffff;
   --foreground: #000000;
