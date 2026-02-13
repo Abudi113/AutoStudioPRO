@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Camera, Zap, Check, ArrowRight, Lightbulb, Star, ChevronDown, ShieldCheck, Rocket, Crosshair } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { motion, useInView } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 import { useLanguage } from '../context/LanguageContext';
 import { useTheme } from '../context/ThemeContext';
@@ -11,18 +11,7 @@ import { submitDemoRequest } from '../services/demoRequestService';
 // --- Reusable Components ---
 
 const SectionWrapper = ({ children, delay = 0 }: { children: React.ReactNode, delay?: number }) => {
-    const ref = useRef(null);
-    const isInView = useInView(ref, { once: true, margin: "-100px" });
-    return (
-        <motion.div
-            ref={ref}
-            initial={{ opacity: 0, y: 30 }}
-            animate={isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 30 }}
-            transition={{ duration: 0.8, ease: "easeOut", delay }}
-        >
-            {children}
-        </motion.div>
-    );
+    return <div style={{ animationDelay: `${delay}s` }}>{children}</div>;
 };
 
 const BeforeAfterSection = ({ t, theme }: any) => {
@@ -64,20 +53,26 @@ const BeforeAfterSection = ({ t, theme }: any) => {
         setSliderPos(Math.min(100, Math.max(0, percentage)));
     };
 
-    const handleMouseDown = () => setIsDragging(true);
-    const handleMouseUp = () => setIsDragging(false);
-    const handleMouseMove = (e: React.MouseEvent) => {
-        if (isDragging) handleMove(e.clientX);
+    const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+        setIsDragging(true);
+        e.currentTarget.setPointerCapture(e.pointerId);
+        handleMove(e.clientX);
     };
-
-    const handleTouchMove = (e: React.TouchEvent) => {
-        handleMove(e.touches[0].clientX);
+    const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+        if (!isDragging) return;
+        handleMove(e.clientX);
+    };
+    const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+        setIsDragging(false);
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+        }
     };
 
     const currentImages = images[activeTab];
 
     return (
-        <div className={`py-24 px-4 ${theme === 'light' ? 'bg-gray-50' : 'bg-zinc-900'} overflow-hidden`}>
+        <div className={`py-16 px-4 ${theme === 'light' ? 'bg-gray-50' : 'bg-zinc-900'} overflow-hidden`}>
             <div className="max-w-7xl mx-auto">
                 {/* Header */}
                 <div className="text-center mb-16">
@@ -113,13 +108,7 @@ const BeforeAfterSection = ({ t, theme }: any) => {
                 {/* Slider */}
                 <div
                     ref={containerRef}
-                    className="relative w-full max-w-5xl mx-auto aspect-[4/3] md:aspect-[21/9] rounded-3xl overflow-hidden shadow-2xl cursor-col-resize select-none border-4 border-white/10 group touch-none"
-                    onMouseDown={handleMouseDown}
-                    onMouseUp={handleMouseUp}
-                    onMouseLeave={handleMouseUp}
-                    onMouseMove={handleMouseMove}
-                    onTouchMove={handleTouchMove}
-                    onClick={(e) => handleMove(e.clientX)}
+                    className="relative w-full max-w-5xl mx-auto aspect-[4/3] md:aspect-[21/9] rounded-3xl overflow-hidden shadow-2xl select-none border-4 border-white/10 group touch-pan-y"
                 >
                     {/* After Image (Background) */}
                     <img
@@ -152,8 +141,12 @@ const BeforeAfterSection = ({ t, theme }: any) => {
 
                     {/* Slider Handle */}
                     <div
-                        className="absolute inset-y-0 w-1 bg-white cursor-col-resize z-30 shadow-[0_0_20px_rgba(0,0,0,0.5)] group-hover:bg-blue-400 transition-colors"
+                        className="absolute inset-y-0 w-1 bg-white cursor-col-resize z-30 shadow-[0_0_20px_rgba(0,0,0,0.5)] group-hover:bg-blue-400 transition-colors touch-none"
                         style={{ left: `${sliderPos}%` }}
+                        onPointerDown={handlePointerDown}
+                        onPointerMove={handlePointerMove}
+                        onPointerUp={handlePointerUp}
+                        onPointerCancel={handlePointerUp}
                     >
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform">
                             <div className="flex gap-1">
@@ -209,9 +202,9 @@ const StatsSection = ({ t, theme }: any) => {
     ];
 
     return (
-        <div className={`py-32 px-4 ${theme === 'light' ? 'bg-white' : 'bg-black'} overflow-hidden`}>
+        <div className={`py-24 px-4 ${theme === 'light' ? 'bg-white' : 'bg-black'} overflow-hidden`}>
             <div className="max-w-7xl mx-auto">
-                <div className="text-center mb-24">
+                <div className="text-center mb-16">
                     <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500/10 text-blue-500 font-bold text-sm tracking-widest uppercase mb-6">
                         Results
                     </span>
@@ -316,9 +309,9 @@ const HowItWorksSection = ({ t, theme }: any) => {
     ];
 
     return (
-        <div id="how-it-works" className={`py-32 px-4 ${theme === 'light' ? 'bg-white' : 'bg-black'}`}>
+        <div id="how-it-works" className={`py-24 px-4 ${theme === 'light' ? 'bg-white' : 'bg-black'}`}>
             <div className="max-w-7xl mx-auto">
-                <div className="text-center mb-24">
+                <div className="text-center mb-16">
                     <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500/10 text-blue-500 font-bold text-sm tracking-widest uppercase mb-6">
                         {t('howItWorks')}
                     </span>
@@ -327,7 +320,7 @@ const HowItWorksSection = ({ t, theme }: any) => {
                     </h2>
                 </div>
 
-                <div className="grid md:grid-cols-3 gap-8 mb-20">
+                <div className="grid md:grid-cols-3 gap-8 mb-14">
                     {steps.map((step, i) => (
                         <div key={i} className={`group relative rounded-[2.5rem] overflow-hidden ${theme === 'light' ? 'bg-white shadow-xl shadow-gray-200/50' : 'bg-zinc-900 border border-white/10'} hover:-translate-y-2 transition-all duration-500`}>
                             <div className="h-64 overflow-hidden relative">
@@ -369,7 +362,7 @@ const HowItWorksSection = ({ t, theme }: any) => {
 
 const ComparisonSection = ({ t, theme }: any) => {
     return (
-        <div className={`py-32 px-4 ${theme === 'light' ? 'bg-gray-50' : 'bg-zinc-900'} relative overflow-hidden`}>
+        <div className={`py-24 px-4 ${theme === 'light' ? 'bg-gray-50' : 'bg-zinc-900'} relative overflow-hidden`}>
             <div className="max-w-7xl mx-auto">
                 <div className="text-center max-w-3xl mx-auto mb-16">
                     <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500/10 text-blue-500 font-bold text-sm tracking-widest uppercase mb-6">
@@ -464,13 +457,13 @@ const TestimonialsSection = ({ t, theme }: any) => {
     ];
 
     return (
-        <div className={`py-32 px-4 ${theme === 'light' ? 'bg-gray-50' : 'bg-zinc-900'} relative overflow-hidden`}>
+        <div className={`py-24 px-4 ${theme === 'light' ? 'bg-gray-50' : 'bg-zinc-900'} relative overflow-hidden`}>
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
                 <div className="absolute top-1/4 -right-64 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl opacity-50" />
                 <div className="absolute bottom-1/4 -left-64 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl opacity-50" />
             </div>
             <div className="max-w-7xl mx-auto relative z-10">
-                <div className="text-center mb-20">
+                <div className="text-center mb-16">
                     <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500/10 text-blue-500 font-bold text-sm tracking-widest uppercase mb-6">
                         {t('valueTrustTitle')}
                     </span>
@@ -549,7 +542,7 @@ const FAQSection = ({ t, theme }: any) => {
     };
 
     return (
-        <div className={`py-32 px-4 ${theme === 'light' ? 'bg-white' : 'bg-black'}`}>
+        <div className={`py-24 px-4 ${theme === 'light' ? 'bg-gray-50' : 'bg-zinc-900/50'}`}>
             <div className="max-w-7xl mx-auto">
                 <div className="text-center mb-16">
                     <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500/10 text-blue-500 font-bold text-sm tracking-widest uppercase mb-6">
@@ -578,6 +571,8 @@ const LandingPageContactForm = ({ t, theme, language }: any) => {
         lastName: '',
         email: '',
         company: '',
+        phone: '',
+        website: '',
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitMessage, setSubmitMessage] = useState<string | null>(null);
@@ -601,6 +596,8 @@ const LandingPageContactForm = ({ t, theme, language }: any) => {
                 lastName: formData.lastName,
                 email: formData.email,
                 company: formData.company,
+                phone: formData.phone,
+                website: formData.website,
                 stockLevel,
                 source: 'landing_page',
                 language,
@@ -612,6 +609,8 @@ const LandingPageContactForm = ({ t, theme, language }: any) => {
                 lastName: '',
                 email: '',
                 company: '',
+                phone: '',
+                website: '',
             });
             setStockLevel('251+');
         } catch {
@@ -622,7 +621,7 @@ const LandingPageContactForm = ({ t, theme, language }: any) => {
     };
 
     return (
-        <div className={`py-32 px-4 ${theme === 'light' ? 'bg-gray-50' : 'bg-zinc-900/50'}`}>
+        <div className={`py-24 px-4 ${theme === 'light' ? 'bg-white' : 'bg-black'}`}>
             <div className="max-w-7xl mx-auto">
                 <div className="grid lg:grid-cols-2 gap-16 items-center">
                     <div>
@@ -692,6 +691,14 @@ const LandingPageContactForm = ({ t, theme, language }: any) => {
                                 value={formData.company}
                                 onChange={handleInputChange}
                             />
+                            <input
+                                type="tel"
+                                name="phone"
+                                placeholder={t('contactFormPhone')}
+                                className={inputClass}
+                                value={formData.phone}
+                                onChange={handleInputChange}
+                            />
 
                             <div className="pt-2">
                                 <label className="block text-sm font-bold text-gray-500 mb-3 uppercase tracking-wider">{t('contactFormStock')}</label>
@@ -708,6 +715,15 @@ const LandingPageContactForm = ({ t, theme, language }: any) => {
                                     ))}
                                 </div>
                             </div>
+
+                            <input
+                                type="url"
+                                name="website"
+                                placeholder={t('contactFormWebsite')}
+                                className={inputClass}
+                                value={formData.website}
+                                onChange={handleInputChange}
+                            />
 
                             <button type="submit" disabled={isSubmitting} className="w-full py-5 bg-blue-600 hover:bg-blue-700 disabled:opacity-70 text-white font-bold text-xl rounded-2xl shadow-xl shadow-blue-500/20 transition-all mt-4">
                                 {isSubmitting ? t('contactFormSubmitting') : t('contactFormButton')}
@@ -771,14 +787,14 @@ const LandingPage: React.FC = () => {
             <SectionWrapper><ComparisonSection t={t} theme={theme} /></SectionWrapper>
             <SectionWrapper><HowItWorksSection t={t} theme={theme} /></SectionWrapper>
             <SectionWrapper><TestimonialsSection t={t} theme={theme} /></SectionWrapper>
-            <SectionWrapper><FAQSection t={t} theme={theme} /></SectionWrapper>
 
             <SectionWrapper>
                 <LandingPageContactForm t={t} theme={theme} language={language} />
             </SectionWrapper>
+            <SectionWrapper><FAQSection t={t} theme={theme} /></SectionWrapper>
 
             <SectionWrapper>
-                <div className={`py-24 px-4 border-t ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-black border-white/10'}`}>
+                <div className={`py-16 px-4 border-t ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-black border-white/10'}`}>
                     <div className="max-w-7xl mx-auto">
                         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-12">
                             {[

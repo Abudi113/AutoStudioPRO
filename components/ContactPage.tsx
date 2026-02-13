@@ -80,9 +80,9 @@ const ContactPage: React.FC = () => {
 
     return (
         <div className={`min-h-screen flex flex-col transition-colors duration-300 ${theme === 'light' ? 'bg-white text-gray-900' : 'bg-zinc-900 text-white'}`}>
-            <div className="flex-grow flex flex-col justify-center pt-32 pb-20 px-4">
+            <div className="flex-grow flex flex-col justify-center pt-24 pb-16 px-4">
                 <div className="max-w-7xl mx-auto w-full">
-                    <div className="text-center mb-20 max-w-5xl mx-auto">
+                    <div className="text-center mb-14 max-w-5xl mx-auto">
                         <motion.h1
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -108,7 +108,7 @@ const ContactPage: React.FC = () => {
                         >
                             <h3 className="text-3xl font-bold mb-10">{t('contactNextStepsTitle')}</h3>
 
-                            <div className="space-y-10 mb-16">
+                            <div className="space-y-8 mb-12">
                                 {steps.map((step, i) => (
                                     <div key={i} className="flex gap-6">
                                         <div className={`flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold ${theme === 'light' ? 'bg-gray-100 text-gray-900' : 'bg-white/10 text-white'}`}>
@@ -236,7 +236,7 @@ const ContactPage: React.FC = () => {
                 </div>
             </div>
 
-            <div className={`py-24 px-4 border-t ${theme === 'light' ? 'bg-gray-50 border-gray-200' : 'bg-black border-white/10'}`}>
+            <div className={`py-16 px-4 border-t ${theme === 'light' ? 'bg-gray-50 border-gray-200' : 'bg-black border-white/10'}`}>
                 <div className="max-w-7xl mx-auto">
                     <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
                         {[
