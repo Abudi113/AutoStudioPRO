@@ -9,6 +9,7 @@ import ProcessingScreen from './ProcessingScreen';
 import OrderDetails from './OrderDetails';
 import BatchExport from './BatchExport';
 import UploadChoice from './UploadChoice';
+import PhotoReview from './PhotoReview';
 import AngleDetectionTest from './AngleDetectionTest';
 import { Language, translations } from '../i18n';
 import { useAuth } from '../context/AuthContext';
@@ -16,21 +17,37 @@ import { useCredits } from '../context/CreditsContext';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
 
-type ViewState = 'dashboard' | 'camera' | 'studio' | 'processing' | 'order-details' | 'batch-export' | 'upload-choice' | 'angle-test';
+type ViewState = 'dashboard' | 'camera' | 'studio' | 'processing' | 'order-details' | 'batch-export' | 'upload-choice' | 'review' | 'angle-test';
 
-const CreateTool: React.FC = () => {
+interface CreateToolProps {
+    initialView?: ViewState;
+}
+
+const CreateTool: React.FC<CreateToolProps> = ({ initialView }) => {
     const { user } = useAuth();
     const { deductCredit, totalCredits } = useCredits();
     const { theme } = useTheme();
     const { language } = useLanguage();
     const t = translations[language] || translations['en'];
 
-    const [view, setView] = useState<ViewState>('dashboard');
+    const [view, setView] = useState<ViewState>(initialView || 'dashboard');
     const [orders, setOrders] = useState<Order[]>([]);
     const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
     const [activeTask, setActiveTask] = useState<TaskType | null>(null);
     const [selectedStudio, setSelectedStudio] = useState<StudioTemplate>(STUDIO_PRESETS[0]);
     const [branding, setBranding] = useState<BrandingConfig>({ logoUrl: null, isEnabled: true });
+    const [tempPhotos, setTempPhotos] = useState<{ angle: CameraAngle; data: string }[]>([]);
+
+    useEffect(() => {
+        // Hide navbar during the studio/camera/processing workflow
+        const noNavViews: ViewState[] = ['camera', 'studio', 'upload-choice', 'review', 'processing'];
+        if (noNavViews.includes(view)) {
+            document.body.classList.add('hide-navbar');
+        } else {
+            document.body.classList.remove('hide-navbar');
+        }
+        return () => document.body.classList.remove('hide-navbar');
+    }, [view]);
 
     useEffect(() => {
         // Check for 'start' query param to auto-launch Studio Picker
@@ -90,6 +107,11 @@ const CreateTool: React.FC = () => {
     };
 
     const handleCaptureComplete = (images: { angle: CameraAngle; data: string }[]) => {
+        setTempPhotos(images);
+        setView('review');
+    };
+
+    const handleReviewConfirm = (images: { angle: CameraAngle; data: string }[]) => {
         if (currentOrder) {
             const newJobs: ProcessingJob[] = images.map(img => ({
                 id: Math.random().toString(36).substr(2, 9),
@@ -135,7 +157,10 @@ const CreateTool: React.FC = () => {
     };
 
     return (
-        <div className="w-full max-w-7xl mx-auto p-4 md:p-6 lg:p-8 animate-in fade-in duration-500">
+        <div className={`w-full mx-auto animate-in fade-in duration-500 ${view === 'dashboard' || view === 'order-details'
+            ? 'w-full px-4 md:px-8'
+            : 'w-full p-2 md:p-4'
+            }`}>
             {view === 'dashboard' && (
                 <Dashboard
                     onTaskSelect={handleTaskSelect}
@@ -162,7 +187,7 @@ const CreateTool: React.FC = () => {
             {view === 'upload-choice' && (
                 <UploadChoice
                     onSelectCamera={() => setView('camera')}
-                    onUploadComplete={handleCaptureComplete}
+                    onUploadComplete={handleReviewConfirm}
                     onBack={() => setView(currentOrder?.taskType === 'bg-replacement' ? 'studio' : 'dashboard')}
                     t={t}
                     theme={theme}
@@ -173,6 +198,15 @@ const CreateTool: React.FC = () => {
                 <CameraCapture
                     onComplete={handleCaptureComplete}
                     onBack={() => setView('upload-choice')}
+                    theme={theme}
+                />
+            )}
+
+            {view === 'review' && (
+                <PhotoReview
+                    images={tempPhotos}
+                    onConfirm={handleReviewConfirm}
+                    onBack={() => setView('camera')}
                     theme={theme}
                 />
             )}

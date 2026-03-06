@@ -10,23 +10,38 @@ interface AuthModalProps {
     onClose: () => void;
     title?: string;
     description?: string;
+    initialMode?: 'login' | 'register';
 }
 
 const AuthModal: React.FC<AuthModalProps> = ({
     isOpen,
     onClose,
     title,
-    description
+    description,
+    initialMode = 'login'
 }) => {
     const { t } = useLanguage();
-    const { signIn } = useAuth();
+    const { signIn, signInWithPassword, signUpWithPassword } = useAuth();
+    const [mode, setMode] = useState<'login' | 'register' | 'magic-link'>(initialMode);
     const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [sent, setSent] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // Sync mode with prop
+    React.useEffect(() => {
+        if (isOpen) {
+            setMode(initialMode);
+            setEmail('');
+            setPassword('');
+            setSent(false);
+            setError(null);
+        }
+    }, [isOpen, initialMode]);
+
     // Use props if provided, otherwise use translations
-    const displayTitle = title || t('authTitle');
+    const displayTitle = title || (mode === 'register' ? t('createAccount') : t('authTitle'));
     const displayDesc = description || t('authDesc');
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -35,11 +50,21 @@ const AuthModal: React.FC<AuthModalProps> = ({
         setError(null);
 
         try {
-            const { error } = await signIn(email);
-            if (error) throw error;
-            setSent(true);
+            if (mode === 'magic-link') {
+                const { error } = await signIn(email);
+                if (error) throw error;
+                setSent(true);
+            } else if (mode === 'register') {
+                const { error } = await signUpWithPassword(email, password);
+                if (error) throw error;
+                setSent(true); // Wait for email confirmation or auto-login
+            } else if (mode === 'login') {
+                const { error } = await signInWithPassword(email, password);
+                if (error) throw error;
+                onClose(); // Automatically close on successful login
+            }
         } catch (err: any) {
-            setError(err.message || 'Failed to send login link');
+            setError(err.message || 'Authentication failed');
         } finally {
             setLoading(false);
         }
@@ -76,8 +101,8 @@ const AuthModal: React.FC<AuthModalProps> = ({
                             {!sent ? (
                                 <>
                                     <div className="text-center mb-8">
-                                        <div className="w-12 h-12 bg-blue-600/20 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500">
-                                            <Mail className="w-6 h-6" />
+                                        <div className="flex justify-center mb-6">
+                                            <img src="/logo.png" alt="Carveo Logo" className="h-10 w-auto brightness-125" />
                                         </div>
                                         <h2 className="text-2xl font-bold text-white mb-2">{displayTitle}</h2>
                                         <p className="text-gray-400">{displayDesc}</p>
@@ -100,6 +125,21 @@ const AuthModal: React.FC<AuthModalProps> = ({
                                             />
                                         </div>
 
+                                        {mode !== 'magic-link' && (
+                                            <div>
+                                                <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1">{t('labelPassword') || 'Password'}</label>
+                                                <input
+                                                    type="password"
+                                                    id="password"
+                                                    required
+                                                    value={password}
+                                                    onChange={(e) => setPassword(e.target.value)}
+                                                    placeholder={t('passwordPlaceholder') || 'Enter password'}
+                                                    className="w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                                                />
+                                            </div>
+                                        )}
+
                                         {error && (
                                             <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
                                                 {error}
@@ -111,12 +151,28 @@ const AuthModal: React.FC<AuthModalProps> = ({
                                             disabled={loading}
                                             className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                         >
-                                            {loading ? t('sendingLink') : <>{t('continueEmail')} <ArrowRight className="w-4 h-4" /></>}
+                                            {loading ? t('sendingLink') : <>{mode === 'magic-link' ? t('continueEmail') : (mode === 'register' ? t('createAccount') : t('loginWithPassword'))} <ArrowRight className="w-4 h-4" /></>}
                                         </button>
                                     </form>
-                                    <p className="mt-6 text-center text-xs text-gray-500">
-                                        We'll email you a magic link for a password-free sign in.
-                                    </p>
+                                    <div className="mt-6 text-center space-y-3">
+                                        {mode === 'login' && (
+                                            <button onClick={() => { setMode('register'); setError(null); }} className="text-sm text-gray-400 hover:text-white transition-colors">
+                                                {t('dontHaveAccount')}
+                                            </button>
+                                        )}
+                                        {mode === 'register' && (
+                                            <button onClick={() => { setMode('login'); setError(null); }} className="text-sm text-gray-400 hover:text-white transition-colors">
+                                                {t('alreadyHaveAccount')}
+                                            </button>
+                                        )}
+                                        {mode !== 'register' && (
+                                            <div>
+                                                <button onClick={() => { setMode(mode === 'magic-link' ? 'login' : 'magic-link'); setError(null); }} className="text-xs text-blue-400 hover:text-blue-300 transition-colors mt-2">
+                                                    {mode === 'magic-link' ? t('usePasswordLog') : t('useMagicLink')}
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                 </>
                             ) : (
                                 <div className="text-center py-8">

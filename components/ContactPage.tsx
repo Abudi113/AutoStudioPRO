@@ -8,7 +8,6 @@ import { submitDemoRequest } from '../services/demoRequestService';
 const ContactPage: React.FC = () => {
     const { t, language } = useLanguage();
     const { theme } = useTheme();
-    const [stockLevel, setStockLevel] = useState('251+');
     const [formData, setFormData] = useState({
         firstName: '',
         lastName: '',
@@ -56,7 +55,6 @@ const ContactPage: React.FC = () => {
                 company: formData.company,
                 phone: formData.phone,
                 website: formData.website,
-                stockLevel,
                 source: 'contact_page',
                 language,
             });
@@ -70,7 +68,6 @@ const ContactPage: React.FC = () => {
                 phone: '',
                 website: '',
             });
-            setStockLevel('251+');
         } catch {
             setSubmitError(t('contactFormError'));
         } finally {
@@ -81,7 +78,7 @@ const ContactPage: React.FC = () => {
     return (
         <div className={`min-h-screen flex flex-col transition-colors duration-300 ${theme === 'light' ? 'bg-white text-gray-900' : 'bg-zinc-900 text-white'}`}>
             <div className="flex-grow flex flex-col justify-center pt-24 pb-16 px-4">
-                <div className="max-w-7xl mx-auto w-full">
+                <div className="w-full px-4 md:px-12 w-full">
                     <div className="text-center mb-14 max-w-5xl mx-auto">
                         <motion.h1
                             initial={{ opacity: 0, y: 20 }}
@@ -192,22 +189,6 @@ const ContactPage: React.FC = () => {
                                     />
                                 </div>
 
-                                <div className="pt-4">
-                                    <label className="block text-sm font-bold text-gray-500 mb-3 uppercase tracking-wider">{t('contactFormStock')}</label>
-                                    <div className="flex flex-wrap gap-2">
-                                        {['251+', '101-250', '61-100', '31-60', '0-30'].map((opt) => (
-                                            <button
-                                                key={opt}
-                                                type="button"
-                                                onClick={() => setStockLevel(opt)}
-                                                className={`px-4 py-2 rounded-full text-sm font-bold transition-all border ${stockLevel === opt ? 'bg-blue-600 text-white border-blue-600' : (theme === 'light' ? 'bg-white text-gray-600 border-gray-200 hover:border-gray-400' : 'bg-zinc-800 text-gray-300 border-white/10 hover:bg-zinc-700')}`}
-                                            >
-                                                {opt}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
                                 <input
                                     type="url"
                                     name="website"
@@ -237,7 +218,7 @@ const ContactPage: React.FC = () => {
             </div>
 
             <div className={`py-16 px-4 border-t ${theme === 'light' ? 'bg-gray-50 border-gray-200' : 'bg-black border-white/10'}`}>
-                <div className="max-w-7xl mx-auto">
+                <div className="w-full px-4 md:px-12">
                     <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
                         {[
                             { icon: ShieldCheck, title: 'contactBadge1Title', sub: 'contactBadge1Sub', desc: 'contactBadge1Desc' },

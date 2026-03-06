@@ -17,7 +17,7 @@ const StudioPicker: React.FC<StudioPickerProps> = ({ selectedStudio, onSelect, o
 
   return (
     <div className="max-w-6xl mx-auto py-2 h-full flex flex-col px-1">
-      <header className="mb-12 flex flex-col sm:flex-row sm:items-center justify-between gap-8">
+      <header className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-8">
         <div className="text-center sm:text-left">
           <h2 className={`text-2xl md:text-4xl font-black mb-2 ${textTitle}`}>{t.selectStudio}</h2>
           <p className="text-gray-500 text-sm md:text-base font-medium">{t.studioSubtitle}</p>
@@ -31,7 +31,7 @@ const StudioPicker: React.FC<StudioPickerProps> = ({ selectedStudio, onSelect, o
         </button>
       </header>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 md:gap-14 flex-1 overflow-y-auto pr-1 pb-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6 flex-1 overflow-y-auto pr-1 pb-10">
         {STUDIO_PRESETS.map((studio) => (
           <div
             key={studio.id}

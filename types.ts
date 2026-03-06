@@ -9,6 +9,9 @@ export type CameraAngle =
   | 'rear_left_34'
   | 'rear_right_34'
   | 'interior'
+  | 'interior_driver'
+  | 'interior_passenger'
+  | 'interior_rear'
   | 'detail'
   | 'door_open'
   | 'trunk_open'
@@ -16,7 +19,8 @@ export type CameraAngle =
   | 'EXTERIOR_CAR'
   | 'INTERIOR_CAR'
   | 'DETAIL_CAR'
-  | 'OTHER';
+  | 'OTHER'
+  | (string & {});
 
 export interface StudioTemplate {
   id: string;

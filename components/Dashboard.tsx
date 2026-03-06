@@ -15,7 +15,8 @@ import {
   Image as ImageIcon,
   MoreVertical,
   Search,
-  Filter
+  Filter,
+  UserCircle
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -65,7 +66,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
       variants={containerVariants}
       initial="hidden"
       animate="visible"
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
+      className="w-full px-4 sm:px-6 lg:px-8 py-8"
     >
       {/* Header Section */}
       <motion.div variants={itemVariants} className="flex flex-col lg:flex-row lg:items-end justify-between gap-8 mb-16">
@@ -110,6 +111,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
                   <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm ${branding.isEnabled ? 'left-7' : 'left-1'}`} />
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Profile Card Placeholder */}
+        <div className={`p-4 md:p-6 rounded-3xl ${cardBase} ${cardStyle} flex items-center justify-center`}>
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-blue-500/10 text-blue-500 flex items-center justify-center">
+              <UserCircle className="w-8 h-8 md:w-10 md:h-10" />
+            </div>
+            <div className="text-center">
+              <span className={`text-sm md:text-base font-bold ${textPrimary}`}>My Profile</span>
+              <p className={`text-xs ${textSecondary}`}>Manage account</p>
             </div>
           </div>
         </div>

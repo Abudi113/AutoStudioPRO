@@ -8,7 +8,7 @@ export interface DemoRequestInput {
   phone?: string;
   website?: string;
   stockLevel?: string;
-  source: 'landing_page' | 'contact_page';
+  source: 'landing_page' | 'contact_page' | 'landing_page_contact';
   language: string;
 }
 

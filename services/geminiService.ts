@@ -1,7 +1,7 @@
 // Gemini Service - Now using Supabase Edge Functions for secure API calls
 // The API key is kept secure on the server side
 
-import { callEdgeFunction, isSupabaseConfigured } from "./supabaseClient";
+import { callEdgeFunction, isSupabaseConfigured, supabase } from "./supabaseClient";
 import { CameraAngle, BrandingConfig } from "../types";
 
 /** Load a fixed studio reference image */
@@ -110,6 +110,9 @@ export const processCarImage = async (
   // Load the studio reference image on the client
   const studioImageBase64 = await loadStudioRef(studioId);
 
+  // Resolve the current user's ID so the edge function can save the result
+  const { data: { user } } = await supabase.auth.getUser();
+
   // Call the Supabase Edge Function
   const result = await callEdgeFunction<{ processedImage: string }>("process-image", {
     action: "process-image",
@@ -118,6 +121,7 @@ export const processCarImage = async (
       studioImageBase64,
       angle: taskType === 'interior' ? 'interior' : angle,
       taskType,
+      userId: user?.id,
       branding: branding ? {
         isEnabled: branding.isEnabled,
         logoUrl: branding.logoUrl,

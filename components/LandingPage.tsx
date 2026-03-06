@@ -73,7 +73,7 @@ const BeforeAfterSection = ({ t, theme }: any) => {
 
     return (
         <div className={`py-16 px-4 ${theme === 'light' ? 'bg-gray-50' : 'bg-zinc-900'} overflow-hidden`}>
-            <div className="max-w-7xl mx-auto">
+            <div className="w-full px-4 md:px-12">
                 {/* Header */}
                 <div className="text-center mb-16">
                     <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500/10 text-blue-500 font-bold text-sm tracking-widest uppercase mb-6">
@@ -203,7 +203,7 @@ const StatsSection = ({ t, theme }: any) => {
 
     return (
         <div className={`py-24 px-4 ${theme === 'light' ? 'bg-white' : 'bg-black'} overflow-hidden`}>
-            <div className="max-w-7xl mx-auto">
+            <div className="w-full px-4 md:px-12">
                 <div className="text-center mb-16">
                     <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500/10 text-blue-500 font-bold text-sm tracking-widest uppercase mb-6">
                         Results
@@ -310,7 +310,7 @@ const HowItWorksSection = ({ t, theme }: any) => {
 
     return (
         <div id="how-it-works" className={`py-24 px-4 ${theme === 'light' ? 'bg-white' : 'bg-black'}`}>
-            <div className="max-w-7xl mx-auto">
+            <div className="w-full px-4 md:px-12">
                 <div className="text-center mb-16">
                     <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500/10 text-blue-500 font-bold text-sm tracking-widest uppercase mb-6">
                         {t('howItWorks')}
@@ -348,10 +348,10 @@ const HowItWorksSection = ({ t, theme }: any) => {
 
                 <div className="text-center">
                     <Link
-                        to="/contact"
+                        to="/dashboard"
                         className="inline-flex px-12 py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold text-xl hover:scale-105 transition-all shadow-xl shadow-blue-500/30 items-center gap-3 group"
                     >
-                        {t('demoRequestCta')}
+                        {t('tryNow')}
                         <ArrowRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
                     </Link>
                 </div>
@@ -363,7 +363,7 @@ const HowItWorksSection = ({ t, theme }: any) => {
 const ComparisonSection = ({ t, theme }: any) => {
     return (
         <div className={`py-24 px-4 ${theme === 'light' ? 'bg-gray-50' : 'bg-zinc-900'} relative overflow-hidden`}>
-            <div className="max-w-7xl mx-auto">
+            <div className="w-full px-4 md:px-12">
                 <div className="text-center max-w-3xl mx-auto mb-16">
                     <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500/10 text-blue-500 font-bold text-sm tracking-widest uppercase mb-6">
                         {t('compare')}
@@ -406,15 +406,15 @@ const ComparisonSection = ({ t, theme }: any) => {
                     </div>
                 </div>
 
-                <div className={`mt-16 mx-auto p-6 rounded-2xl ${theme === 'light' ? 'bg-yellow-50 border border-yellow-200' : 'bg-yellow-900/20 border border-yellow-500/20'} flex gap-4 max-w-xl text-left items-start`}>
-                    <div className="flex-shrink-0 w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center shadow-md">
-                        <Lightbulb className="w-6 h-6 text-yellow-900 fill-current" />
+                <div className={`mt-16 mx-auto p-6 rounded-2xl ${theme === 'light' ? 'bg-blue-50 border border-blue-200' : 'bg-yellow-900/20 border border-yellow-500/20'} flex gap-4 max-w-xl text-left items-start`}>
+                    <div className={`flex-shrink-0 w-12 h-12 ${theme === 'light' ? 'bg-blue-600' : 'bg-yellow-400'} rounded-full flex items-center justify-center shadow-md`}>
+                        <Lightbulb className={`w-6 h-6 ${theme === 'light' ? 'text-white' : 'text-yellow-900'} fill-current`} />
                     </div>
                     <div>
-                        <h4 className={`font-bold text-lg mb-1 ${theme === 'light' ? 'text-yellow-900' : 'text-yellow-400'}`}>
+                        <h4 className={`font-bold text-lg mb-1 ${theme === 'light' ? 'text-blue-900' : 'text-yellow-400'}`}>
                             {t('compDidYouKnowTitle')}
                         </h4>
-                        <p className={`text-sm ${theme === 'light' ? 'text-yellow-800' : 'text-yellow-200/80'} leading-relaxed`}>
+                        <p className={`text-sm ${theme === 'light' ? 'text-blue-800' : 'text-yellow-200/80'} leading-relaxed`}>
                             {t('compDidYouKnowText')}
                         </p>
                     </div>
@@ -462,7 +462,7 @@ const TestimonialsSection = ({ t, theme }: any) => {
                 <div className="absolute top-1/4 -right-64 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl opacity-50" />
                 <div className="absolute bottom-1/4 -left-64 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl opacity-50" />
             </div>
-            <div className="max-w-7xl mx-auto relative z-10">
+            <div className="w-full px-4 md:px-12 relative z-10">
                 <div className="text-center mb-16">
                     <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500/10 text-blue-500 font-bold text-sm tracking-widest uppercase mb-6">
                         {t('valueTrustTitle')}
@@ -492,7 +492,7 @@ const TestimonialsSection = ({ t, theme }: any) => {
                                     </h4>
                                     <div className="flex justify-center gap-1 my-1.5">
                                         {[1, 2, 3, 4, 5].map(s => (
-                                            <Star key={s} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                                            <Star key={s} className={`w-4 h-4 ${theme === 'light' ? 'fill-blue-500 text-blue-500' : 'fill-yellow-400 text-yellow-400'}`} />
                                         ))}
                                     </div>
                                     <p className={`text-sm font-medium uppercase tracking-wider ${theme === 'light' ? 'text-blue-600' : 'text-blue-400'}`}>
@@ -543,7 +543,7 @@ const FAQSection = ({ t, theme }: any) => {
 
     return (
         <div className={`py-24 px-4 ${theme === 'light' ? 'bg-gray-50' : 'bg-zinc-900/50'}`}>
-            <div className="max-w-7xl mx-auto">
+            <div className="w-full px-4 md:px-12">
                 <div className="text-center mb-16">
                     <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500/10 text-blue-500 font-bold text-sm tracking-widest uppercase mb-6">
                         {t('faqLabel')}
@@ -565,7 +565,6 @@ const FAQSection = ({ t, theme }: any) => {
 };
 
 const LandingPageContactForm = ({ t, theme, language }: any) => {
-    const [stockLevel, setStockLevel] = useState('251+');
     const [formData, setFormData] = useState({
         firstName: '',
         lastName: '',
@@ -598,8 +597,7 @@ const LandingPageContactForm = ({ t, theme, language }: any) => {
                 company: formData.company,
                 phone: formData.phone,
                 website: formData.website,
-                stockLevel,
-                source: 'landing_page',
+                source: 'landing_page_contact',
                 language,
             });
 
@@ -612,7 +610,6 @@ const LandingPageContactForm = ({ t, theme, language }: any) => {
                 phone: '',
                 website: '',
             });
-            setStockLevel('251+');
         } catch {
             setSubmitError(t('contactFormError'));
         } finally {
@@ -622,7 +619,7 @@ const LandingPageContactForm = ({ t, theme, language }: any) => {
 
     return (
         <div className={`py-24 px-4 ${theme === 'light' ? 'bg-white' : 'bg-black'}`}>
-            <div className="max-w-7xl mx-auto">
+            <div className="w-full px-4 md:px-12">
                 <div className="grid lg:grid-cols-2 gap-16 items-center">
                     <div>
                         <h2 className={`text-5xl md:text-7xl font-black mb-8 ${theme === 'light' ? 'text-gray-900' : 'text-white'} tracking-tighter`}>
@@ -700,22 +697,6 @@ const LandingPageContactForm = ({ t, theme, language }: any) => {
                                 onChange={handleInputChange}
                             />
 
-                            <div className="pt-2">
-                                <label className="block text-sm font-bold text-gray-500 mb-3 uppercase tracking-wider">{t('contactFormStock')}</label>
-                                <div className="flex flex-wrap gap-2">
-                                    {['251+', '101-250', '61-100', '31-60', '0-30'].map((opt) => (
-                                        <button
-                                            key={opt}
-                                            type="button"
-                                            onClick={() => setStockLevel(opt)}
-                                            className={`px-4 py-2 rounded-full text-xs font-bold transition-all border ${stockLevel === opt ? 'bg-blue-600 text-white border-blue-600' : (theme === 'light' ? 'bg-white text-gray-600 border-gray-200 hover:border-gray-400' : 'bg-zinc-800 text-gray-300 border-white/10 hover:bg-zinc-700')}`}
-                                        >
-                                            {opt}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
                             <input
                                 type="url"
                                 name="website"
@@ -760,7 +741,7 @@ const LandingPage: React.FC = () => {
                 transition={{ duration: 1 }}
                 className="relative min-h-screen flex items-center justify-center pt-32 pb-20 md:pt-40 md:pb-32 px-4 overflow-hidden"
             >
-                <div className="max-w-7xl mx-auto relative z-10 text-center">
+                <div className="w-full px-4 md:px-12 relative z-10 text-center">
                     <h1 className={`text-6xl md:text-8xl font-black mb-6 tracking-tighter ${textTitle}`}>
                         {t('heroTitle').split('.').map((part: string, i: number) => (
                             <span key={i}>{part}{i === 0 && <br />}</span>
@@ -771,10 +752,10 @@ const LandingPage: React.FC = () => {
                     </p>
                     <div className="flex flex-col md:flex-row items-center justify-center gap-4">
                         <Link
-                            to="/contact"
+                            to="/dashboard"
                             className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold text-lg transition-all shadow-lg shadow-blue-500/25 flex items-center gap-2 group"
                         >
-                            {t('demoRequestCta')}
+                            {t('tryNow')}
                             <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                         </Link>
                     </div>
@@ -795,7 +776,7 @@ const LandingPage: React.FC = () => {
 
             <SectionWrapper>
                 <div className={`py-16 px-4 border-t ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-black border-white/10'}`}>
-                    <div className="max-w-7xl mx-auto">
+                    <div className="w-full px-4 md:px-12">
                         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-12">
                             {[
                                 { icon: ShieldCheck, title: 'contactBadge1Title', sub: 'contactBadge1Sub', desc: 'contactBadge1Desc' },
@@ -814,6 +795,19 @@ const LandingPage: React.FC = () => {
                                     </div>
                                 </div>
                             ))}
+                        </div>
+                        <div className={`mt-12 pt-8 border-t ${theme === 'light' ? 'border-gray-200' : 'border-white/10'} flex flex-col md:flex-row items-center justify-between gap-4`}>
+                            <p className={`text-sm ${theme === 'light' ? 'text-gray-500' : 'text-gray-500'}`}>
+                                © {new Date().getFullYear()} Carveo. All rights reserved.
+                            </p>
+                            <div className="flex items-center gap-6">
+                                <Link to="/privacy" className={`text-sm font-medium ${theme === 'light' ? 'text-gray-500 hover:text-blue-600' : 'text-gray-500 hover:text-blue-400'} transition-colors`}>
+                                    Privacy Policy
+                                </Link>
+                                <Link to="/contact" className={`text-sm font-medium ${theme === 'light' ? 'text-gray-500 hover:text-blue-600' : 'text-gray-500 hover:text-blue-400'} transition-colors`}>
+                                    Contact
+                                </Link>
+                            </div>
                         </div>
                     </div>
                 </div>

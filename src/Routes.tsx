@@ -6,6 +6,7 @@ import AuthCallback from '../components/AuthCallback.tsx';
 
 import ContactPage from '../components/ContactPage.tsx';
 import AboutPage from '../components/AboutPage.tsx';
+import PrivacyPolicyPage from '../components/PrivacyPolicyPage.tsx';
 import Layout from '../components/Layout.tsx';
 
 import ScrollToTop from '../components/ScrollToTop.tsx';
@@ -28,10 +29,13 @@ const AppRoutes: React.FC = () => {
                 <Route path="/about" element={<Layout><AboutPage /></Layout>} />
 
                 <Route path="/contact" element={<Layout><ContactPage /></Layout>} />
+                <Route path="/privacy" element={<Layout><PrivacyPolicyPage /></Layout>} />
                 <Route path="/auth" element={<AuthCallback />} />
                 <Route path="/dashboard" element={<Layout><CreateTool /></Layout>} />
                 {/* The existing App is now the "Create" tool */}
                 <Route path="/create" element={<Layout><CreateTool /></Layout>} />
+                {/* Testing Route */}
+                <Route path="/angle-test" element={<Layout><CreateTool initialView="angle-test" /></Layout>} />
                 {/* Catch-all redirect */}
                 <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

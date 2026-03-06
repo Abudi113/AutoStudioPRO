@@ -1,17 +1,28 @@
 
 import { CameraAngle, StudioTemplate, TaskType } from './types';
 
-export const CAMERA_ANGLES: { id: CameraAngle; label: string; icon: string }[] = [
-  { id: 'front', label: 'angleFront', icon: 'fa-arrow-up' },
-  { id: 'front_left_34', label: 'angleFrontLeft', icon: 'fa-arrow-up-right' },
-  { id: 'left', label: 'angleLeft', icon: 'fa-arrow-right' },
-  { id: 'rear_left_34', label: 'angleRearLeft', icon: 'fa-arrow-down-right' },
-  { id: 'rear', label: 'angleRear', icon: 'fa-arrow-down' },
-  { id: 'rear_right_34', label: 'angleRearRight', icon: 'fa-arrow-down-left' },
-  { id: 'right', label: 'angleRight', icon: 'fa-arrow-left' },
-  { id: 'front_right_34', label: 'angleFrontRight', icon: 'fa-arrow-up-left' },
-  { id: 'interior', label: 'angleInterior', icon: 'fa-steering-wheel' },
-];
+export const CAMERA_ANGLES: {
+  id: CameraAngle;
+  label: string;
+  icon: string;
+  template: 'front' | 'rear' | 'side' | 'three-quarter' | 'interior';
+  defaultZoom: number;
+  hint: string;
+}[] = [
+    { id: 'front', label: 'Front', icon: 'fa-arrow-up', template: 'front', defaultZoom: 1, hint: 'positionHints.front' },
+    { id: 'front_right_34', label: 'Front Right', icon: 'fa-arrow-up-right', template: 'three-quarter', defaultZoom: 1, hint: 'positionHints.threeQuarter' },
+    { id: 'right', label: 'Side Right', icon: 'fa-arrow-right', template: 'side', defaultZoom: 1, hint: 'positionHints.side' },
+    { id: 'rear_right_34', label: 'Rear Right', icon: 'fa-arrow-down-right', template: 'three-quarter', defaultZoom: 1, hint: 'positionHints.threeQuarter' },
+    { id: 'rear', label: 'Rear', icon: 'fa-arrow-down', template: 'rear', defaultZoom: 1, hint: 'positionHints.rear' },
+    { id: 'rear_left_34', label: 'Rear Left', icon: 'fa-arrow-down-left', template: 'three-quarter', defaultZoom: 1, hint: 'positionHints.threeQuarter' },
+    { id: 'left', label: 'Side Left', icon: 'fa-arrow-left', template: 'side', defaultZoom: 1, hint: 'positionHints.side' },
+    { id: 'front_left_34', label: 'Front Left', icon: 'fa-arrow-up-left', template: 'three-quarter', defaultZoom: 1, hint: 'positionHints.threeQuarter' },
+
+    // Interior
+    { id: 'interior_driver', label: 'Driver', icon: 'fa-circle-user', template: 'interior', defaultZoom: 1.5, hint: 'positionHints.interior' },
+    { id: 'interior_passenger', label: 'Front Passenger', icon: 'fa-user', template: 'interior', defaultZoom: 1.5, hint: 'positionHints.interior' },
+    { id: 'interior_rear', label: 'Rear Seat', icon: 'fa-couch', template: 'interior', defaultZoom: 1.5, hint: 'positionHints.interior' },
+  ];
 
 export const STUDIO_PRESETS: StudioTemplate[] = [
   {

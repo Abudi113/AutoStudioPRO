@@ -122,7 +122,7 @@ const AboutPage: React.FC = () => {
 
             {/* 1. Hero & Metrics Section */}
             <div className={`min-h-screen flex flex-col justify-center pt-24 pb-16 px-4 ${bg1} text-center`}>
-                <div className="max-w-7xl mx-auto">
+                <div className="w-full px-4 md:px-12">
                     {/* Hero */}
                     <div className="mb-16 max-w-4xl mx-auto">
                         <motion.h1
@@ -169,7 +169,7 @@ const AboutPage: React.FC = () => {
 
             {/* 2. "What makes us special" Section (Alternating Background) */}
             <div className={`py-24 px-4 ${bg2}`}>
-                <div className="max-w-7xl mx-auto grid lg:grid-cols-12 gap-12">
+                <div className="w-full px-4 md:px-12 grid lg:grid-cols-12 gap-12">
                     <div className="lg:col-span-5">
                         <motion.h2
                             initial={{ opacity: 0, x: -20 }}
@@ -204,7 +204,7 @@ const AboutPage: React.FC = () => {
 
             {/* 3. Values Section (Original Background) */}
             <div className={`py-24 px-4 ${bg1}`}>
-                <div className="max-w-7xl mx-auto">
+                <div className="w-full px-4 md:px-12">
                     <div className="text-center max-w-3xl mx-auto mb-12">
                         <h2 className={`text-4xl md:text-6xl font-black mb-6 tracking-tighter ${text1}`}>
                             {t('aboutValuesTitle')}

@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Camera, Lightbulb, Move, CheckCircle2 } from 'lucide-react';
+import { X, Camera, Lightbulb, Move, CheckCircle2, Box } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
 interface PhotoGuideProps {
@@ -19,7 +19,12 @@ const PhotoGuide: React.FC<PhotoGuideProps> = ({ isOpen, onClose }) => {
             desc: t('tipAnglesDesc')
         },
         {
-            icon: <Lightbulb className="w-5 h-5 text-yellow-500" />,
+            icon: <Box className="w-5 h-5 text-emerald-500" />,
+            title: t('tipColorsTitle'),
+            desc: t('tipColorsDesc')
+        },
+        {
+            icon: <Lightbulb className="w-5 h-5 text-blue-500" />,
             title: t('tipSunTitle'),
             desc: t('tipSunDesc')
         },

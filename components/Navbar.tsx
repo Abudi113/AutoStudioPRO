@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Camera, Sun, Moon, LogOut, User, Menu, X, Globe, CreditCard, LayoutDashboard } from 'lucide-react';
+import { Camera, Sun, Moon, LogOut, User, Menu, X, Globe, CreditCard, LayoutDashboard, Smartphone } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCredits } from '../context/CreditsContext';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
 import VaultModal from './VaultModal';
+import AppTokenModal from './AppTokenModal';
+import AuthModal from './AuthModal';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Navbar: React.FC = () => {
@@ -16,6 +18,9 @@ const Navbar: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [isLangOpen, setIsLangOpen] = useState(false);
     const [showVault, setShowVault] = useState(false);
+    const [showAppToken, setShowAppToken] = useState(false);
+    const [showAuth, setShowAuth] = useState(false);
+    const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
     const location = useLocation();
 
     // Handle hash navigation on mount
@@ -58,12 +63,16 @@ const Navbar: React.FC = () => {
     return (
         <>
             <nav className="fixed top-0 left-0 right-0 z-50 bg-[var(--background)]/80 backdrop-blur-md border-b border-[var(--border)] transition-colors duration-300">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="w-full px-4 sm:px-6 lg:px-8">
                     <div className="flex items-center justify-between h-20">
                         {/* Logo */}
-                        <Link to="/" className="flex items-center gap-3">
-                            <Camera className="w-10 h-10 text-blue-500" />
-                            <span className="text-2xl font-bold tracking-wider bg-gradient-to-r from-blue-500 to-blue-400 bg-clip-text text-transparent">CARVEO</span>
+                        <Link to="/" className="flex items-center">
+                            <img
+                                src="/logo.png"
+                                alt="Carveo Logo"
+                                className="h-14 w-auto object-contain brightness-125 contrast-110 drop-shadow-[0_0_5px_rgba(255,255,255,0.2)]"
+                                style={{ minWidth: '160px' }}
+                            />
                         </Link>
 
                         {/* Desktop Navigation */}
@@ -154,12 +163,21 @@ const Navbar: React.FC = () => {
                                         <button className="p-2.5 rounded-full hover:bg-gray-500/10 transition-colors">
                                             <User className="w-6 h-6" />
                                         </button>
-                                        <div className="absolute right-0 mt-2 w-48 bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 transform origin-top-right">
+                                        <div className="absolute right-0 mt-2 w-56 bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 transform origin-top-right">
                                             <div className="py-2">
                                                 <button
-                                                    onClick={() => signOut()}
-                                                    className="block w-full text-left px-4 py-2.5 text-base hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                                                    onClick={() => setShowAppToken(true)}
+                                                    className="flex items-center gap-3 w-full text-left px-4 py-2.5 text-base hover:bg-blue-500/10 hover:text-blue-500 transition-colors"
                                                 >
+                                                    <Smartphone className="w-4 h-4" />
+                                                    Mobile App Access
+                                                </button>
+                                                <div className="border-t border-[var(--border)] my-1" />
+                                                <button
+                                                    onClick={() => signOut()}
+                                                    className="flex items-center gap-3 w-full text-left px-4 py-2.5 text-base hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                                                >
+                                                    <LogOut className="w-4 h-4" />
                                                     {t('signOut')}
                                                 </button>
                                             </div>
@@ -167,12 +185,20 @@ const Navbar: React.FC = () => {
                                     </div>
                                 </>
                             ) : (
-                                <Link
-                                    to="/contact"
-                                    className="px-6 py-2.5 text-base font-bold text-white bg-blue-600 rounded-full hover:bg-blue-700 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/20"
-                                >
-                                    {t('demoRequestCta')}
-                                </Link>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => { setAuthMode('login'); setShowAuth(true); }}
+                                        className="px-6 py-2.5 text-base font-bold text-gray-700 dark:text-gray-300 hover:text-blue-500 transition-colors"
+                                    >
+                                        {t('login')}
+                                    </button>
+                                    <button
+                                        onClick={() => { setAuthMode('register'); setShowAuth(true); }}
+                                        className="px-6 py-2.5 text-base font-bold text-white bg-blue-600 rounded-full hover:bg-blue-700 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/20"
+                                    >
+                                        {t('register')}
+                                    </button>
+                                </div>
                             )}
                         </div>
 
@@ -257,6 +283,13 @@ const Navbar: React.FC = () => {
                                                 <span className="text-blue-500 font-bold">{totalCredits}</span>
                                             </div>
                                             <button
+                                                onClick={() => { setShowAppToken(true); setIsOpen(false); }}
+                                                className="flex items-center gap-2 w-full text-left px-3 py-2 text-base font-medium opacity-70 hover:opacity-100 rounded-xl"
+                                            >
+                                                <Smartphone className="w-5 h-5" />
+                                                Mobile App Access
+                                            </button>
+                                            <button
                                                 onClick={() => { signOut(); setIsOpen(false); }}
                                                 className="w-full text-left px-3 py-2 text-base font-medium text-red-500 hover:bg-red-500/10 rounded-xl"
                                             >
@@ -265,13 +298,18 @@ const Navbar: React.FC = () => {
                                         </>
                                     ) : (
                                         <div className="flex flex-col gap-3 px-3">
-                                            <Link
-                                                to="/contact"
-                                                onClick={() => setIsOpen(false)}
+                                            <button
+                                                onClick={() => { setAuthMode('login'); setShowAuth(true); setIsOpen(false); }}
+                                                className="w-full py-3 text-center text-sm font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-white/10 rounded-full hover:bg-gray-200 dark:hover:bg-white/20 transition-colors"
+                                            >
+                                                {t('login')}
+                                            </button>
+                                            <button
+                                                onClick={() => { setAuthMode('register'); setShowAuth(true); setIsOpen(false); }}
                                                 className="w-full py-3 text-center text-sm font-bold text-white bg-blue-600 rounded-full hover:bg-blue-700 transition-colors"
                                             >
-                                                {t('demoRequestCta')}
-                                            </Link>
+                                                {t('register')}
+                                            </button>
                                         </div>
                                     )}
                                 </div>
@@ -283,6 +321,8 @@ const Navbar: React.FC = () => {
             </nav>
 
             <VaultModal isOpen={showVault} onClose={() => setShowVault(false)} />
+            <AppTokenModal isOpen={showAppToken} onClose={() => setShowAppToken(false)} />
+            <AuthModal isOpen={showAuth} onClose={() => setShowAuth(false)} initialMode={authMode} />
         </>
     );
 };

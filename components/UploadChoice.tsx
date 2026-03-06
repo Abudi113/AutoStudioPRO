@@ -80,8 +80,8 @@ const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadCom
   // TAGGING UI GRID
   if (isTagging) {
     return (
-      <div className="max-w-7xl mx-auto h-full flex flex-col py-6 px-4">
-        <header className="mb-8 flex justify-between items-center bg-[var(--card)]/50 p-6 rounded-2xl backdrop-blur-sm border border-[var(--border)]">
+      <div className="max-w-7xl mx-auto h-full flex flex-col py-2 px-2">
+        <header className="mb-4 flex justify-between items-center bg-[var(--card)]/50 p-4 rounded-2xl backdrop-blur-sm border border-[var(--border)]">
           <div>
             <h2 className="text-3xl font-black text-[var(--foreground)] mb-1">{t.tagYourPhotos}</h2>
             <p className="text-gray-500 text-sm">{t.tagSubtitle}</p>
@@ -103,7 +103,7 @@ const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadCom
           </div>
         </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 overflow-y-auto pb-20">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 overflow-y-auto pb-20">
           {taggingItems.map((item, idx) => (
             <div key={idx} className={`relative group ${cardStyles} rounded-2xl overflow-hidden flex flex-col`}>
               <div className="relative aspect-[4/3] bg-gray-900 border-b border-[var(--border)]">
@@ -173,12 +173,12 @@ const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadCom
           {t.tips}
         </button>
       </div>
-      <header className="mb-20 text-center">
+      <header className="mb-10 text-center">
         <h2 className="text-3xl md:text-5xl font-black mb-4 text-[var(--foreground)] tracking-tight">{t.howToProceed}</h2>
         <p className="text-gray-500 text-base md:text-lg font-medium">{t.tagSubtitle}</p>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-24 mb-20">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-12 mb-10">
         <button
           onClick={onSelectCamera}
           className={`group flex flex-col items-center p-12 rounded-[48px] border-2 transition-all hover:translate-y-[-10px] bg-[var(--card)] border-[var(--border)] shadow-lg hover:border-blue-500 hover:shadow-2xl shadow-blue-900/10`}

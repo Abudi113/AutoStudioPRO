@@ -8,6 +8,7 @@ import { AuthProvider } from './context/AuthContext';
 import { CreditsProvider } from './context/CreditsContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { LanguageProvider } from './context/LanguageContext';
+import CrispChat from './components/CrispChat';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -21,6 +22,7 @@ root.render(
       <CreditsProvider>
         <ThemeProvider>
           <LanguageProvider>
+            {/* <CrispChat /> */}
             <AppRoutes />
           </LanguageProvider>
         </ThemeProvider>

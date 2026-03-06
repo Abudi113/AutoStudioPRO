@@ -9,8 +9,9 @@ export const translations = {
     contact: "Contact",
     dashboard: "Dashboard",
     login: "Log In",
+    register: "Register",
+    tryNow: "Try Now",
     getStarted: "Get Started",
-    signOut: "Sign Out",
     lightMode: "Light Mode",
     darkMode: "Dark Mode",
     credits: "Credits",
@@ -82,15 +83,56 @@ export const translations = {
     noVinDetected: "NO VIN DETECTED",
 
     // Auth Modal
-    authTitle: "Save Your Work",
-    authDesc: "Create a free account to download your high-quality studio photos.",
-    continueEmail: "Continue with Email",
-    sendingLink: "Sending Link...",
+    authTitle: "Sign In",
+    authDesc: "Create a free account to access your AutoStudioPRO dashboard.",
+    emailPlaceholder: "name@company.com",
+    labelPassword: "Password",
+    passwordPlaceholder: "Enter password",
+    continueEmail: "Continue",
+    loginWithPassword: "Log In",
+    createAccount: "Create Account",
+    alreadyHaveAccount: "Already have an account? Log In",
+    dontHaveAccount: "Don't have an account? Register",
+    useMagicLink: "Or use Magic Link (Passwordless)",
+    usePasswordLog: "Or use Password",
+    sendingLink: "Sending...",
     checkInbox: "Check your inbox!",
     magicLinkSent: "We've sent a magic login link to",
     closeWindow: "Close Window",
-    emailPlaceholder: "you@example.com",
     includesFreeCredits: "Includes 5 Free Credits",
+
+    // Camera UI (New)
+    rotatePhone: "Please Rotate Your Phone",
+    rotatePhoneDesc: "The Carveo camera is optimized for landscape. Please rotate your device to continue.",
+    finish: "Finish",
+    extraPhoto: "Extra Photo",
+    align: "Align",
+    matches: "Perfect",
+    waitingSignal: "Waiting for signal...",
+    captured: "Captured",
+    pending: "Pending",
+    skip: "Skip",
+    retake: "Retake",
+    moveLeft: "Move Left",
+    moveRight: "Move Right",
+    stepBack: "Step Back",
+    lowerCamera: "Lower Camera",
+    positionHints: {
+      threeQuarter: "Align the car's corner to the yellow rails",
+      side: "Keep the car centered in the box",
+      interior: "Frame the dashboard and steering wheel",
+      trunk: "Center the open trunk in the frame"
+    },
+    colorGuide: {
+      front: "Front (Green)",
+      rear: "Rear (Red)"
+    },
+
+    // Photo Review
+    photoReviewTitle: "Order & Selection",
+    photoReviewDesc: "Arrange your shots or remove images before AI processing starts.",
+    confirmProcessing: "Start Processing",
+    noPhotosSelected: "No photos selected.",
 
     // Vault Modal
     vaultTitle: "Credit Vault",
@@ -145,6 +187,10 @@ export const translations = {
     tipSpaceDesc: "Don't crop too close. Leave space around the car so the AI can accurately render the floor and shadows.",
     tipCleanTitle: "Clean the Car",
     tipCleanDesc: "The AI renders reflections based on the original surface. A clean car leads to much better results.",
+    tipColorsTitle: "Color Coded Guides",
+    tipColorsDesc: "Green bars represent the front of the car, Red bars represent the rear. Align the vehicle within these markers for perfect results.",
+    warningCarNotInFrame: "Warning: Vehicle not fully in frame! Move back slowly.",
+    carDetected: "Vehicle Detected",
     proTipTitle: "Pro Tip: Framing",
     proTipDesc: "Position the car in the center of the frame. Ensure no other cars or distracting objects are partially visible in the foreground. Our AI works best when the subject is clear.",
     gotIt: "Got it, let's shoot!",
@@ -152,7 +198,6 @@ export const translations = {
     // Camera Capture
     guidedAssistant: "Guided Assistant",
     gallery: "Gallery",
-    skip: "Skip",
     warnReflections: "Avoid reflections & harsh shadows",
 
     // Processing Screen
@@ -427,7 +472,7 @@ export const translations = {
     contactIncluded3: "ROI calculation for your dealership",
     contactIncluded4: "Custom branding preview",
     contactIncluded5: "Q&A with our experts",
-    contactFormTitle: "Request your demo",
+    contactFormTitle: "Contact Us",
     contactFormFirstName: "Your first name",
     contactFormLastName: "Your last name",
     contactFormEmail: "Your e-mail",
@@ -483,8 +528,9 @@ export const translations = {
     contact: "Kontakt",
     dashboard: "Dashboard",
     login: "Einloggen",
+    register: "Registrieren",
+    tryNow: "Jetzt ausprobieren",
     getStarted: "Loslegen",
-    signOut: "Abmelden",
     lightMode: "Heller Modus",
     darkMode: "Dunkler Modus",
     credits: "Guthaben",
@@ -556,15 +602,56 @@ export const translations = {
     noVinDetected: "KEINE VIN ERKANNT",
 
     // Auth Modal
-    authTitle: "Arbeit speichern",
-    authDesc: "Erstellen Sie ein kostenloses Konto, um Ihre Studiofotos in hoher Qualität herunterzuladen.",
-    continueEmail: "Weiter mit E-Mail",
-    sendingLink: "Link wird gesendet...",
+    authTitle: "Anmelden",
+    authDesc: "Erstellen Sie ein kostenloses Konto, um auf Ihr AutoStudioPRO Dashboard zuzugreifen.",
+    emailPlaceholder: "name@firma.de",
+    labelPassword: "Passwort",
+    passwordPlaceholder: "Passwort eingeben",
+    continueEmail: "Weiter",
+    loginWithPassword: "Einloggen",
+    createAccount: "Konto erstellen",
+    alreadyHaveAccount: "Bereits ein Konto? Einloggen",
+    dontHaveAccount: "Noch kein Konto? Registrieren",
+    useMagicLink: "Oder Magic Link verwenden",
+    usePasswordLog: "Oder Passwort verwenden",
+    sendingLink: "Wird gesendet...",
     checkInbox: "Prüfen Sie Ihren Posteingang!",
     magicLinkSent: "Wir haben einen magischen Login-Link gesendet an",
     closeWindow: "Fenster schließen",
-    emailPlaceholder: "sie@beispiel.de",
     includesFreeCredits: "Inklusive 5 Gratis-Credits",
+
+    // Camera UI (Neu)
+    rotatePhone: "Bitte Handy drehen",
+    rotatePhoneDesc: "Die Carveo Kamera ist für das Querformat optimiert. Bitte drehe dein Gerät, um fortzufahren.",
+    finish: "Abschließen",
+    extraPhoto: "Extra Foto",
+    align: "Ausrichten",
+    matches: "Passt",
+    waitingSignal: "Warten auf Signal...",
+    captured: "Aufgenommen",
+    pending: "Ausstehend",
+    skip: "Überspringen",
+    retake: "Wiederholen",
+    moveLeft: "Nach links",
+    moveRight: "Nach rechts",
+    stepBack: "Zurücktreten",
+    lowerCamera: "Kamera senken",
+    positionHints: {
+      threeQuarter: "Ecke des Autos an den gelben Schienen ausrichten",
+      side: "Auto im Kasten zentrieren",
+      interior: "Armaturenbrett und Lenkrad einrahmen",
+      trunk: "Geöffneten Kofferraum mittig ausrichten"
+    },
+    colorGuide: {
+      front: "Vorne (Grün)",
+      rear: "Hinten (Rot)"
+    },
+
+    // Photo Review
+    photoReviewTitle: "Reihenfolge & Auswahl",
+    photoReviewDesc: "Ordne deine Aufnahmen an oder entferne Bilder, bevor die KI-Verarbeitung startet.",
+    confirmProcessing: "Verarbeitung starten",
+    noPhotosSelected: "Keine Bilder ausgewählt.",
 
     // Vault Modal
     vaultTitle: "Guthaben-Tresor",
@@ -619,6 +706,10 @@ export const translations = {
     tipSpaceDesc: "Nicht zu eng beschneiden. Lassen Sie Platz um das Auto, damit die KI Boden und Schatten präzise rendern kann.",
     tipCleanTitle: "Auto reinigen",
     tipCleanDesc: "Die KI berechnet Reflexionen basierend auf der Originaloberfläche. Ein sauberes Auto führt zu viel besseren Ergebnissen.",
+    tipColorsTitle: "Farbcodierte Guides",
+    tipColorsDesc: "Grüne Balken markieren die Vorderseite des Autos, rote Balken die Rückseite. Richten Sie das Fahrzeug innerhalb dieser Markierungen aus.",
+    warningCarNotInFrame: "Warnung: Fahrzeug nicht vollständig im Bild! Bitte langsam zurückweichen.",
+    carDetected: "Fahrzeug erkannt",
     proTipTitle: "Profi-Tipp: Bildausschnitt",
     proTipDesc: "Positionieren Sie das Auto in der Mitte. Stellen Sie sicher, dass keine anderen Autos oder störenden Objekte im Vordergrund sichtbar sind.",
     gotIt: "Verstanden, los geht's!",
@@ -626,7 +717,6 @@ export const translations = {
     // Camera Capture
     guidedAssistant: "Geführter Assistent",
     gallery: "Galerie",
-    skip: "Überspringen",
     warnReflections: "Reflexionen & harte Schatten vermeiden",
 
     // Processing Screen
@@ -901,7 +991,7 @@ export const translations = {
     contactIncluded3: "ROI-Berechnung für Ihr Autohaus",
     contactIncluded4: "Vorschau Ihres Brandings",
     contactIncluded5: "Q&A mit unseren Experten",
-    contactFormTitle: "Demo anfordern",
+    contactFormTitle: "Kontakt aufnehmen",
     contactFormFirstName: "Ihr Vorname",
     contactFormLastName: "Ihr Nachname",
     contactFormEmail: "Ihre E-Mail",
