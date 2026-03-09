@@ -6,7 +6,8 @@ import { TaskType, Order, StudioTemplate, ProcessingJob, CameraAngle, BrandingCo
 import { processCarImage } from '../services/geminiService';
 import Dashboard from './Dashboard';
 import CameraCapture from './CameraCapture';
-import VinScanner from './VinScanner';
+// VIN process — temporarily disabled, code preserved in VinScanner.tsx
+// import VinScanner from './VinScanner';
 import StudioPicker from './StudioPicker';
 import ProcessingScreen from './ProcessingScreen';
 import OrderDetails from './OrderDetails';
@@ -21,7 +22,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { saveProject, saveJobImage, createProjectRecord, loadProjects, loadProjectById, deleteProject, renameProject } from '../services/projectsService';
 import { Link, useSearchParams } from 'react-router-dom';
 
-type ViewState = 'dashboard' | 'camera' | 'studio' | 'vin-entry' | 'vin-scan' | 'processing' | 'order-details' | 'batch-export' | 'upload-choice';
+type ViewState = 'dashboard' | 'camera' | 'studio' | 'processing' | 'order-details' | 'batch-export' | 'upload-choice';
 
 const CreateTool: React.FC = () => {
     const { user, session } = useAuth();
@@ -38,7 +39,8 @@ const CreateTool: React.FC = () => {
     const [branding, setBranding] = useState<BrandingConfig>({ logoUrl: null, isEnabled: true });
     const savedProjectIds = useRef<Set<string>>(new Set());
     const [showNoCreditsModal, setShowNoCreditsModal] = useState(false);
-    const [vinInput, setVinInput] = useState('');
+    // VIN process disabled — preserved for future use
+    // const [vinInput, setVinInput] = useState('');
     const [showRotateModal, setShowRotateModal] = useState(false);
     const [loadingProjects, setLoadingProjects] = useState(true);
 
@@ -157,17 +159,18 @@ const CreateTool: React.FC = () => {
     };
 
     const handleGoToChoice = () => {
-        setView('vin-entry');
-    };
-
-    const handleVinComplete = (vin: string) => {
-        if (currentOrder) {
-            const updated = { ...currentOrder, vin, title: vin };
-            setCurrentOrder(updated);
-            setOrders(prev => prev.map(o => o.id === currentOrder.id ? { ...o, vin, title: vin } : o));
-        }
         setView('upload-choice');
     };
+
+    // VIN process disabled — handler preserved for future use
+    // const handleVinComplete = (vin: string) => {
+    //     if (currentOrder) {
+    //         const updated = { ...currentOrder, vin, title: vin };
+    //         setCurrentOrder(updated);
+    //         setOrders(prev => prev.map(o => o.id === currentOrder.id ? { ...o, vin, title: vin } : o));
+    //     }
+    //     setView('upload-choice');
+    // };
 
     const handleCaptureComplete = (images: { angle: CameraAngle; data: string }[]) => {
         if (currentOrder) {
@@ -187,7 +190,7 @@ const CreateTool: React.FC = () => {
 
             setCurrentOrder(updatedOrder);
             setOrders(prev => [updatedOrder, ...prev.filter(o => o.id !== updatedOrder.id)]);
-            setVinInput('');
+            // setVinInput(''); // VIN disabled
             setView('processing');
 
             // Create project record in Supabase in the background (non-blocking)
@@ -363,7 +366,6 @@ const CreateTool: React.FC = () => {
     // Step indicator logic
     const STEPS = [
         { label: 'Studio', views: ['studio'] },
-        { label: 'VIN', views: ['vin-entry', 'vin-scan'] },
         { label: 'Fotos', views: ['upload-choice', 'camera'] },
         { label: 'Verarbeitung', views: ['processing'] },
         { label: 'Ergebnis', views: ['order-details', 'batch-export'] },
@@ -533,6 +535,7 @@ const CreateTool: React.FC = () => {
                 </div>
             )}
 
+            {/* VIN process disabled — code preserved in VinScanner.tsx
             {view === 'vin-entry' && (
                 <div className="max-w-lg mx-auto mt-8 animate-in fade-in duration-500">
                     <button
@@ -602,6 +605,7 @@ const CreateTool: React.FC = () => {
                     theme={theme}
                 />
             )}
+            */}
 
             {view === 'camera' && (
                 <CameraCapture

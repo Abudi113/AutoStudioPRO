@@ -124,7 +124,7 @@ function analyzeCarFrontSide(v: HTMLVideoElement, b: [number, number, number, nu
     const qw = 18; let ll = 0, ln = 0, rl = 0, rn = 0;
     for (let y = 10; y < 38; y++) for (let x = 0; x < 72; x++) { const i = (y * 72 + x) * 4; const lm = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; if (x < qw) { ll += lm; ln++; } else if (x >= 54) { rl += lm; rn++; } }
     const al = ln > 0 ? ll / ln : 0, ar = rn > 0 ? rl / rn : 0, d = Math.abs(al - ar), m = Math.max(al, ar);
-    if (m === 0 || d / m < 0.12) return 'unknown';
+    if (m === 0 || d / m < 0.08) return 'unknown';
     return al > ar ? 'left' : 'right';
   } catch { return 'unknown'; }
 }
@@ -136,11 +136,11 @@ function analyzeCarFrontRear(v: HTMLVideoElement, b: [number, number, number, nu
     ctx.drawImage(v, b[0], b[1] + b[3] * 0.6, b[2], b[3] * 0.4, 0, 0, 72, 48);
     const p = ctx.getImageData(0, 0, 72, 48).data, tot = 72 * 48;
     let rc = 0, wc = 0;
-    for (let i = 0; i < tot; i++) { const r = p[i * 4], g = p[i * 4 + 1], bv = p[i * 4 + 2]; if (r > 140 && r > g * 1.5 && r > bv * 1.5) rc++; else if (r > 180 && g > 180 && bv > 180) wc++; }
+    for (let i = 0; i < tot; i++) { const r = p[i * 4], g = p[i * 4 + 1], bv = p[i * 4 + 2]; if (r > 120 && r > g * 1.3 && r > bv * 1.3) rc++; else if (r > 180 && g > 180 && bv > 180) wc++; }
     const rr = rc / tot, wr = wc / tot;
-    if (rr < 0.04 && wr < 0.06) return 'unknown';
-    if (rr > wr && rr > 0.05) return 'rear';
-    if (wr > rr && wr > 0.07) return 'front';
+    if (rr < 0.02 && wr < 0.03) return 'unknown';
+    if (rr > wr && rr > 0.03) return 'rear';
+    if (wr > rr && wr > 0.05) return 'front';
     return 'unknown';
   } catch { return 'unknown'; }
 }
@@ -329,6 +329,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onComplete, onBack }) => 
     if (!modelReady) return;
     const gz = ANGLE_GUIDE_ZONES[activeAngle.id];
     if (!gz) { setIsCarDetected(false); return; }
+    setIsCarDetected(false); // Reset immediately on angle change to prevent stale green glow
     let cancelled = false;
 
     const run = async () => {
@@ -354,7 +355,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onComplete, onBack }) => 
           });
           if (!cancelled) setIsCarDetected(inZone);
         }
-      } catch { /* ignore */ }
+      } catch (e) { console.warn('[CarDetection]', e); }
       if (!cancelled) detectionRef.current = setTimeout(run, 400);
     };
     detectionRef.current = setTimeout(run, 800);
@@ -364,8 +365,25 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onComplete, onBack }) => 
   const takePhoto = useCallback(() => {
     const video = videoRef.current, canvas = canvasRef.current;
     if (!video || !canvas) return;
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    canvas.getContext('2d')?.drawImage(video, 0, 0);
+
+    // Crop to 4:3 aspect ratio from center of the video frame
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const targetRatio = 4 / 3;
+    const currentRatio = vw / vh;
+
+    let sx = 0, sy = 0, sw = vw, sh = vh;
+    if (currentRatio > targetRatio) {
+      // Video is wider than 4:3 — crop sides
+      sw = Math.round(vh * targetRatio);
+      sx = Math.round((vw - sw) / 2);
+    } else if (currentRatio < targetRatio) {
+      // Video is taller than 4:3 — crop top/bottom
+      sh = Math.round(vw / targetRatio);
+      sy = Math.round((vh - sh) / 2);
+    }
+
+    canvas.width = sw; canvas.height = sh;
+    canvas.getContext('2d')?.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
     const data = canvas.toDataURL('image/jpeg', 0.9);
     setReviewImage(data);
   }, []);

@@ -884,7 +884,7 @@ const LandingPage: React.FC = () => {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.8 }}
-                className={`relative h-screen flex flex-col overflow-hidden ${theme === 'light' ? 'bg-[#f0efeb]' : 'bg-[#0a0a12]'}`}
+                className={`relative min-h-screen h-screen flex flex-col overflow-hidden ${theme === 'light' ? 'bg-[#f0efeb]' : 'bg-[#0a0a12]'}`}
             >
                 {/* Car image — full background */}
                 <div className="absolute inset-0">
@@ -892,7 +892,7 @@ const LandingPage: React.FC = () => {
                         src="/demo/hero-car.png"
                         onError={(e) => { (e.target as HTMLImageElement).src = '/demo/exterior-after.png'; }}
                         alt="Carveo AI Studio"
-                        className="w-full h-full object-cover object-center"
+                        className="w-full h-full object-cover hero-car-img"
                     />
                     {/* Bottom fade */}
                     <div
@@ -903,7 +903,7 @@ const LandingPage: React.FC = () => {
 
                 {/* Animated blue glow — futuristic pulse */}
                 <div
-                    className="absolute top-24 left-1/2 -translate-x-1/2 w-[600px] h-[300px] pointer-events-none"
+                    className="absolute top-16 sm:top-24 left-1/2 -translate-x-1/2 w-[300px] sm:w-[600px] h-[150px] sm:h-[300px] pointer-events-none"
                     style={{
                         background: 'radial-gradient(ellipse at center, rgba(91,110,245,0.35) 0%, transparent 70%)',
                         animation: 'pulseRow 4s ease-in-out infinite'
@@ -917,10 +917,10 @@ const LandingPage: React.FC = () => {
                 />
 
                 {/* Content */}
-                <div className="relative z-10 flex flex-col items-center text-center pt-32 px-4 gap-6">
+                <div className="relative z-10 flex flex-col items-center text-center pt-20 sm:pt-32 px-4 gap-4 sm:gap-6">
 
                     {/* Headline */}
-                    <h1 className="text-5xl md:text-7xl lg:text-8xl font-black tracking-tighter leading-none text-white drop-shadow-2xl">
+                    <h1 className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl font-black tracking-tighter leading-none text-white drop-shadow-2xl">
                         {(() => {
                             const title = t('heroTitle').split('.')[0];
                             const parts = title.split('#1');
@@ -939,10 +939,10 @@ const LandingPage: React.FC = () => {
                 </div>
 
                 {/* CTA + social proof — bottom */}
-                <div className="absolute bottom-20 left-0 right-0 z-10 flex flex-col items-center gap-4 px-4">
+                <div className="absolute bottom-8 sm:bottom-20 left-0 right-0 z-10 flex flex-col items-center gap-3 sm:gap-4 px-4">
                     <Link
                         to="/create?start=true"
-                        className="px-10 py-4 text-white font-bold text-lg rounded-full flex items-center gap-2 group transition-all hover:scale-105 active:scale-95 shadow-2xl"
+                        className="px-6 sm:px-10 py-3 sm:py-4 text-white font-bold text-base sm:text-lg rounded-full flex items-center gap-2 group transition-all hover:scale-105 active:scale-95 shadow-2xl"
                         style={{ background: 'linear-gradient(135deg, #0678e8 0%, #0560c5 100%)', boxShadow: '0 0 30px rgba(91,110,245,0.5)' }}
                     >
                         {t('getStartedFree')}
@@ -950,16 +950,16 @@ const LandingPage: React.FC = () => {
                     </Link>
 
                     {/* Social proof strip */}
-                    <div className="flex flex-wrap items-center justify-center gap-4">
+                    <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">
                         <div className="flex items-center gap-1.5" style={{ color: 'rgba(255,255,255,0.85)' }}>
-                            <span className="text-yellow-400 text-sm">★★★★★</span>
-                            <span className="text-sm font-semibold">4.9/5</span>
-                            <span className="text-xs opacity-70">von 200+ Händlern</span>
+                            <span className="text-yellow-400 text-xs sm:text-sm">★★★★★</span>
+                            <span className="text-xs sm:text-sm font-semibold">4.9/5</span>
+                            <span className="text-[10px] sm:text-xs opacity-70">von 200+ Händlern</span>
                         </div>
-                        <div className="w-px h-4 bg-white/20" />
+                        <div className="hidden sm:block w-px h-4 bg-white/20" />
                         <div className="flex items-center gap-1.5" style={{ color: 'rgba(255,255,255,0.85)' }}>
-                            <span className="text-[#0678e8] text-sm">✓</span>
-                            <span className="text-xs opacity-70">Kostenlos starten — keine Kreditkarte</span>
+                            <span className="text-[#0678e8] text-xs sm:text-sm">✓</span>
+                            <span className="text-[10px] sm:text-xs opacity-70">Kostenlos starten — keine Kreditkarte</span>
                         </div>
                     </div>
                 </div>

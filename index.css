@@ -83,3 +83,14 @@ body::-webkit-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Hero car image — show more of the car body on mobile */
+.hero-car-img {
+  object-position: center 65%;
+}
+
+@media (min-width: 640px) {
+  .hero-car-img {
+    object-position: center center;
+  }
+}
