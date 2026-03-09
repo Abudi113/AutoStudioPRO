@@ -56,7 +56,7 @@ const BatchExport: React.FC<BatchExportProps> = ({ order, onBack, t, theme, onDo
   };
 
   return (
-    <div className="max-w-4xl mx-auto py-6 md:py-10 px-2">
+    <div className="w-full py-6 md:py-10 px-2">
       <header className="mb-10 flex items-center gap-4">
         <button onClick={onBack} className={`w-10 h-10 rounded-xl ${theme === 'light' ? 'bg-gray-100 hover:bg-gray-200' : 'bg-white/5 hover:bg-white/10'} flex items-center justify-center transition-colors`}>
           <i className="fa-solid fa-arrow-left"></i>

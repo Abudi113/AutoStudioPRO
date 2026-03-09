@@ -1,7 +1,8 @@
 
-import React from 'react';
+import React, { useState, useRef } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { TASKS } from '../constants';
-import { TaskType, Order, BrandingConfig } from '../types';
+import { TaskType, Order, BrandingConfig, StudioTemplate } from '../types';
 import { motion } from 'framer-motion';
 import {
   Sparkles,
@@ -11,47 +12,86 @@ import {
   Clock,
   CheckCircle,
   ChevronRight,
+  ChevronDown,
   UploadCloud,
   Image as ImageIcon,
-  MoreVertical,
-  Search,
-  Filter
+  Trash2,
+  Car,
+  Loader2,
+  Settings,
+  Camera,
+  Palette,
+  Database,
+  Crown,
+  Shield,
+  Stamp
 } from 'lucide-react';
 
 interface DashboardProps {
   onTaskSelect: (task: TaskType) => void;
   orders: Order[];
+  loadingProjects?: boolean;
   onOrderSelect: (order: Order) => void;
+  onDeleteOrder: (orderId: string) => void;
+  onRenameOrder: (orderId: string, newTitle: string) => Promise<void>;
   branding: BrandingConfig;
   onLogoUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onToggleBranding: () => void;
+  selectedStudio: StudioTemplate;
   t: any;
   theme: 'light' | 'dark';
 }
 
 const iconMap: Record<string, React.ReactNode> = {
   'Sparkles': <Sparkles className="w-8 h-8" />,
-  'Zap': <div className="w-8 h-8 font-bold text-2xl">⚡</div>, // Fallback or custom
+  'Zap': <div className="w-8 h-8 font-bold text-2xl">⚡</div>,
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSelect, branding, onLogoUpload, onToggleBranding, t, theme }) => {
-  // Enhanced Glassmorphism & Theme Styles
-  // Matches LandingPage premium feel
+const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, loadingProjects, onOrderSelect, onDeleteOrder, onRenameOrder, branding, onLogoUpload, onToggleBranding, selectedStudio, t, theme }) => {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+
+  const toggleCard = (id: string) => {
+    setExpandedCards(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const startEdit = (e: React.MouseEvent, order: Order) => {
+    e.stopPropagation();
+    setEditingId(order.id);
+    setEditValue(order.title || order.vin || '');
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const saveEdit = async (orderId: string) => {
+    const trimmed = editValue.trim();
+    if (!trimmed) { setEditingId(null); return; }
+    setSavingId(orderId);
+    setEditingId(null);
+    await onRenameOrder(orderId, trimmed);
+    setSavingId(null);
+  };
+
+  const cancelEdit = () => setEditingId(null);
 
   const textPrimary = 'text-[var(--foreground)]';
   const textSecondary = 'text-gray-500';
-
-  // Use CSS variables for card backgrounds to ensure they match global theme
   const cardBase = "backdrop-blur-md border shadow-xl transition-all duration-300";
   const cardStyle = "bg-[var(--card)] border-[var(--border)]";
+  const [showAll, setShowAll] = useState(false);
 
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
-      transition: {
-        staggerChildren: 0.1
-      }
+      transition: { staggerChildren: 0.1 }
     }
   };
 
@@ -60,59 +100,33 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
     visible: { opacity: 1, y: 0, transition: { duration: 0.5 } }
   };
 
+  const handleDelete = (e: React.MouseEvent, orderId: string) => {
+    e.stopPropagation();
+    if (confirmDeleteId === orderId) {
+      onDeleteOrder(orderId);
+      setConfirmDeleteId(null);
+    } else {
+      setConfirmDeleteId(orderId);
+      // Auto-reset confirmation after 3s
+      setTimeout(() => setConfirmDeleteId(prev => prev === orderId ? null : prev), 3000);
+    }
+  };
+
   return (
     <motion.div
       variants={containerVariants}
       initial="hidden"
       animate="visible"
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
+      className="w-full px-4 sm:px-6 lg:px-8 py-8"
     >
       {/* Header Section */}
-      <motion.div variants={itemVariants} className="flex flex-col lg:flex-row lg:items-end justify-between gap-8 mb-16">
-        <div>
-          <h1 className={`text-4xl md:text-6xl font-black tracking-tight mb-4 ${textPrimary}`}>
-            {t.welcome}
-          </h1>
-          <p className={`text-xl ${textSecondary} font-medium max-w-2xl`}>
-            {t.subtitle}
-          </p>
-        </div>
-
-        {/* Brand Management Card */}
-        <div className={`p-6 rounded-3xl ${cardBase} ${cardStyle}`}>
-          <div className="flex items-center gap-6">
-            <div className="relative group">
-              <label className="cursor-pointer block relative">
-                <input type="file" className="hidden" accept="image/*" onChange={onLogoUpload} />
-                <div className={`w-20 h-20 rounded-2xl flex items-center justify-center overflow-hidden transition-all duration-300 group-hover:scale-105 border-2 border-dashed border-[var(--border)] bg-[var(--background)]`}>
-                  {branding.logoUrl ? (
-                    <img src={branding.logoUrl} className="w-full h-full object-contain p-2" alt="Logo" />
-                  ) : (
-                    <Plus className={`w-8 h-8 ${textSecondary}`} />
-                  )}
-                </div>
-                <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform">
-                  <Pen className="w-4 h-4" />
-                </div>
-              </label>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <span className="text-[10px] font-black opacity-50 uppercase tracking-widest text-[var(--foreground)]">{t.branding}</span>
-              <div className="flex items-center gap-4">
-                <span className={`text-sm font-bold ${branding.isEnabled ? 'text-green-500' : textSecondary}`}>
-                  {branding.isEnabled ? t.active : t.disabled}
-                </span>
-                <button
-                  onClick={onToggleBranding}
-                  className={`w-12 h-6 rounded-full transition-all relative ${branding.isEnabled ? 'bg-green-500' : 'bg-gray-700'}`}
-                >
-                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm ${branding.isEnabled ? 'left-7' : 'left-1'}`} />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      <motion.div variants={itemVariants} className="mb-16">
+        <h1 className={`text-4xl md:text-6xl font-black tracking-tight mb-4 ${textPrimary}`}>
+          {t.welcome}
+        </h1>
+        <p className={`text-xl ${textSecondary} font-medium max-w-2xl`}>
+          {t.subtitle}
+        </p>
       </motion.div>
 
       {/* Quick Actions / Tasks */}
@@ -131,7 +145,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
               onClick={() => onTaskSelect(task)}
               className={`group relative p-8 rounded-[32px] text-left transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl overflow-hidden ${cardBase} ${cardStyle} hover:border-blue-500/30`}
             >
-              {/* Background Glow */}
               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/20 rounded-full blur-3xl -mr-16 -mt-16 transition-opacity opacity-0 group-hover:opacity-100" />
 
               <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-6 transition-all duration-300 group-hover:scale-110 group-hover:rotate-3 ${theme === 'light' ? 'bg-blue-50 text-blue-600' : 'bg-blue-500/20 text-blue-400'}`}>
@@ -149,93 +162,165 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
         </div>
       </motion.section>
 
-      {/* Recent Projects */}
+      {/* Vehicle Inventory */}
       <motion.section variants={itemVariants}>
         <div className="flex items-center justify-between mb-8 px-2">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500">
-              <Layers className="w-5 h-5" />
+              <Car className="w-5 h-5" />
             </div>
-            <h3 className={`text-2xl font-black tracking-tight ${textPrimary}`}>{t.recentProjects}</h3>
+            <h3 className={`text-2xl font-black tracking-tight ${textPrimary}`}>{t.vehicleInventory || 'Vehicle Inventory'}</h3>
+            {orders.length > 0 && (
+              <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${theme === 'light' ? 'bg-gray-100 text-gray-500' : 'bg-white/10 text-gray-400'}`}>
+                {orders.length}
+              </span>
+            )}
           </div>
-          <button className={`text-sm font-bold uppercase tracking-wider hover:underline ${theme === 'light' ? 'text-blue-600' : 'text-blue-400'}`}>
-            {t.viewAll}
-          </button>
+          {orders.length > 4 && (
+            <button
+              onClick={() => setShowAll(prev => !prev)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${theme === 'light' ? 'bg-gray-100 hover:bg-gray-200 text-gray-600' : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'}`}
+            >
+              {showAll ? (t.showLess || 'Show Less') : (t.showAll || `Show All (${orders.length})`)}
+            </button>
+          )}
         </div>
 
-        <div className={`rounded-[32px] overflow-hidden ${cardBase} ${cardStyle}`}>
-          {orders.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[800px]">
-                <thead>
-                  <tr className={`border-b border-[var(--border)] bg-[var(--background)]/50`}>
-                    <th className="px-8 py-6 text-xs font-black text-gray-400 uppercase tracking-widest">{t.orderVin}</th>
-                    <th className="px-8 py-6 text-xs font-black text-gray-400 uppercase tracking-widest">{t.photos}</th>
-                    <th className="px-8 py-6 text-xs font-black text-gray-400 uppercase tracking-widest">{t.status}</th>
-                    <th className="px-8 py-6 text-xs font-black text-gray-400 uppercase tracking-widest">{t.date}</th>
-                    <th className="px-8 py-6"></th>
-                  </tr>
-                </thead>
-                <tbody className={`divide-y divide-[var(--border)]`}>
-                  {orders.map((order) => (
-                    <tr
-                      key={order.id}
-                      onClick={() => onOrderSelect(order)}
-                      className="group cursor-pointer transition-colors hover:bg-[var(--foreground)]/5"
-                    >
-                      <td className="px-8 py-6">
-                        <div className={`text-base font-bold ${textPrimary}`}>{order.title}</div>
-                        <div className="text-xs text-gray-500 font-mono mt-1 opacity-70 group-hover:opacity-100 transition-opacity">
-                          {order.vin || t.noVinDetected}
+        {loadingProjects ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {[1, 2, 3].map(i => (
+              <div key={i} className={`rounded-[28px] overflow-hidden ${cardBase} ${cardStyle} animate-pulse`}>
+                <div className={`aspect-[4/3] ${theme === 'light' ? 'bg-gray-200' : 'bg-white/5'}`} />
+                <div className="p-5 space-y-3">
+                  <div className={`h-4 w-2/3 rounded-full ${theme === 'light' ? 'bg-gray-200' : 'bg-white/10'}`} />
+                  <div className={`h-3 w-1/3 rounded-full ${theme === 'light' ? 'bg-gray-100' : 'bg-white/5'}`} />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : orders.length > 0 ? (
+          <motion.div
+            key={showAll ? 'all' : 'limited'}
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+            initial="hidden"
+            animate="visible"
+            variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.05 } } }}
+          >
+            {(showAll ? orders : orders.slice(0, 4)).map((order) => {
+              // Find thumbnail: prefer thumbnailUrl from DB, fall back to first job image
+              const thumbnailSrc = order.thumbnailUrl || order.jobs?.find(j => j.processedImage)?.processedImage || null;
+
+              return (
+                <motion.div
+                  key={order.id}
+                  variants={itemVariants}
+                  onClick={() => onOrderSelect(order)}
+                  className={`group relative rounded-[28px] overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl ${cardBase} ${cardStyle} hover:border-blue-500/30`}
+                >
+                  {/* Thumbnail / Image Area */}
+                  <div className={`relative aspect-[4/3] overflow-hidden ${theme === 'light' ? 'bg-gray-100' : 'bg-white/5'}`}>
+                    {thumbnailSrc ? (
+                      <img
+                        src={thumbnailSrc}
+                        alt={order.title || order.vin || 'Vehicle'}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Car className={`w-16 h-16 ${theme === 'light' ? 'text-gray-200' : 'text-white/10'}`} />
+                      </div>
+                    )}
+
+                    {/* Photo count badge */}
+                    <div className={`absolute top-3 right-3 px-2.5 py-1 rounded-full text-[10px] font-black backdrop-blur-md ${theme === 'light' ? 'bg-white/80 text-gray-700' : 'bg-black/60 text-white'}`}>
+                      <ImageIcon className="w-3 h-3 inline mr-1" />
+                      {order.jobs.length}
+                    </div>
+
+                    {/* Status badge */}
+                    <div className="absolute top-3 left-3">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold backdrop-blur-md border ${order.status === 'completed'
+                        ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                        : 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                        }`}>
+                        {order.status === 'completed' ? <CheckCircle className="w-3 h-3" /> : <Clock className="w-3 h-3 animate-pulse" />}
+                        {order.status}
+                      </span>
+                    </div>
+
+                    {/* Hover overlay with delete */}
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-300" />
+                  </div>
+
+                  {/* Card Body */}
+                  <div className="p-5">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      {editingId === order.id ? (
+                        <input
+                          ref={inputRef}
+                          value={editValue}
+                          onChange={e => setEditValue(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') saveEdit(order.id); if (e.key === 'Escape') cancelEdit(); }}
+                          onBlur={() => saveEdit(order.id)}
+                          onClick={e => e.stopPropagation()}
+                          className={`text-sm font-bold tracking-wide px-2 py-1 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500 w-full ${theme === 'light' ? 'bg-white border-gray-300 text-gray-900' : 'bg-white/10 border-white/20 text-white'}`}
+                        />
+                      ) : savingId === order.id ? (
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Loader2 className="w-4 h-4 animate-spin text-blue-500 shrink-0" />
+                          <span className={`text-sm font-bold truncate ${textPrimary}`}>{order.title || order.vin}</span>
                         </div>
-                      </td>
-                      <td className="px-8 py-6">
-                        <div className="flex items-center gap-3">
-                          <div className="flex -space-x-2">
-                            {[...Array(Math.min(3, order.jobs.length))].map((_, i) => (
-                              <div key={i} className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-[10px] ${theme === 'light' ? 'border-white bg-gray-100 text-gray-500' : 'border-black bg-white/10 text-white'}`}>
-                                <ImageIcon className="w-3 h-3" />
-                              </div>
-                            ))}
-                            {order.jobs.length > 3 && (
-                              <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-[10px] font-bold ${theme === 'light' ? 'border-white bg-gray-200 text-gray-600' : 'border-black bg-white/20 text-white'}`}>
-                                +{order.jobs.length - 3}
-                              </div>
-                            )}
-                          </div>
+                      ) : (
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className={`text-sm font-bold truncate ${textPrimary}`}>
+                            {order.title || order.vin || 'Untitled'}
+                          </span>
+                          <button
+                            onClick={e => startEdit(e, order)}
+                            title="Rename"
+                            className={`opacity-0 group-hover:opacity-100 p-1 rounded-lg transition-all shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400 hover:text-gray-700' : 'hover:bg-white/10 text-gray-600 hover:text-gray-300'}`}
+                          >
+                            <Pen className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                      </td>
-                      <td className="px-8 py-6">
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${order.status === 'completed'
-                          ? 'bg-green-500/10 text-green-500 border-green-500/20'
-                          : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-                          }`}>
-                          {order.status === 'completed' ? <CheckCircle className="w-3 h-3" /> : <Clock className="w-3 h-3 animate-pulse" />}
-                          {order.status}
-                        </span>
-                      </td>
-                      <td className="px-8 py-6 text-sm font-medium text-gray-500">
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className={`text-[11px] font-medium ${textSecondary}`}>
                         {new Date(order.createdAt).toLocaleDateString()}
-                      </td>
-                      <td className="px-8 py-6 text-right">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${theme === 'light' ? 'bg-gray-100 group-hover:bg-blue-50 text-gray-400 group-hover:text-blue-600' : 'bg-white/5 group-hover:bg-blue-500/20 text-gray-500 group-hover:text-blue-400'}`}>
-                          <ChevronRight className="w-4 h-4" />
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={(e) => handleDelete(e, order.id)}
+                          className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${confirmDeleteId === order.id
+                            ? 'bg-red-500 text-white scale-110'
+                            : `opacity-0 group-hover:opacity-100 ${theme === 'light' ? 'bg-gray-100 hover:bg-red-50 text-gray-400 hover:text-red-500' : 'bg-white/5 hover:bg-red-500/20 text-gray-500 hover:text-red-400'}`
+                            }`}
+                          title={confirmDeleteId === order.id ? (t.confirmDelete || 'Click again to delete') : (t.deleteProject || 'Delete')}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all ${theme === 'light' ? 'bg-gray-100 text-gray-400' : 'bg-white/5 text-gray-500'}`}>
+                          <ChevronRight className="w-3.5 h-3.5" />
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </motion.div>
+        ) : (
+          <div className={`rounded-[32px] overflow-hidden ${cardBase} ${cardStyle}`}>
             <div className="py-32 px-6 flex flex-col items-center justify-center text-center">
               <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-6 animate-pulse ${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'}`}>
-                <UploadCloud className={`w-10 h-10 ${theme === 'light' ? 'text-gray-300' : 'text-gray-600'}`} />
+                <Car className={`w-10 h-10 ${theme === 'light' ? 'text-gray-300' : 'text-gray-600'}`} />
               </div>
-              <h3 className={`text-xl font-bold mb-2 ${textPrimary}`}>{t.noProjects}</h3>
+              <h3 className={`text-xl font-bold mb-2 ${textPrimary}`}>{t.noVehicles || 'No vehicles yet'}</h3>
               <p className={`text-sm ${textSecondary} max-w-sm mb-8`}>{t.createFirst}</p>
 
-              {/* Optional CTA */}
               <button
                 onClick={() => onTaskSelect(TASKS[0])}
                 className="px-6 py-3 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg shadow-blue-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-2"
@@ -244,7 +329,251 @@ const Dashboard: React.FC<DashboardProps> = ({ onTaskSelect, orders, onOrderSele
                 {t.createNewProject}
               </button>
             </div>
-          )}
+          </div>
+        )}
+      </motion.section>
+
+      {/* Custom Setup / Consistent Branding */}
+      <motion.section variants={itemVariants} className="mt-20">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500">
+            <Settings className="w-5 h-5" />
+          </div>
+          <h3 className={`text-2xl font-black tracking-tight ${textPrimary}`}>{t.customSetup} / {t.consistentBranding}</h3>
+        </div>
+        <p className={`text-sm mb-8 ml-11 ${textSecondary}`}>{t.customSetupDesc}</p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+
+          {/* 1. Logo */}
+          <div className={`rounded-[28px] overflow-hidden transition-all duration-300 ${cardBase} ${cardStyle}`}>
+            <button
+              onClick={() => toggleCard('logo')}
+              className="w-full p-6 flex items-center gap-4 text-left"
+            >
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${theme === 'light' ? 'bg-emerald-50 text-emerald-600' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                <Stamp className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className={`text-base font-bold ${textPrimary}`}>{t.csLogo}</h4>
+                <p className={`text-xs mt-0.5 ${textSecondary} truncate`}>{t.csLogoDesc}</p>
+              </div>
+              <ChevronDown className={`w-5 h-5 shrink-0 transition-transform duration-300 ${textSecondary} ${expandedCards.has('logo') ? 'rotate-180' : ''}`} />
+            </button>
+            <AnimatePresence>
+              {expandedCards.has('logo') && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="overflow-hidden"
+                >
+                  <div className={`px-6 pb-6 space-y-4 border-t ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
+                    {/* Watermark Logo Upload */}
+                    <div className="pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className={`text-sm font-semibold ${textPrimary}`}>{t.csWatermarkLogo}</span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400">{t.freeLabel}</span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <label className="cursor-pointer block relative group">
+                          <input type="file" className="hidden" accept="image/*" onChange={onLogoUpload} />
+                          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center overflow-hidden transition-all duration-300 group-hover:scale-105 border-2 border-dashed ${theme === 'light' ? 'border-gray-200 bg-gray-50' : 'border-white/10 bg-white/5'}`}>
+                            {branding.logoUrl ? (
+                              <img src={branding.logoUrl} className="w-full h-full object-contain p-1.5" alt="Logo" />
+                            ) : (
+                              <Plus className={`w-6 h-6 ${textSecondary}`} />
+                            )}
+                          </div>
+                          <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform">
+                            <Pen className="w-3 h-3" />
+                          </div>
+                        </label>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3">
+                            <span className={`text-sm font-bold ${branding.isEnabled ? 'text-green-500' : textSecondary}`}>
+                              {branding.isEnabled ? t.active : t.disabled}
+                            </span>
+                            <button
+                              onClick={onToggleBranding}
+                              className={`w-11 h-6 rounded-full transition-all relative ${branding.isEnabled ? 'bg-green-500' : theme === 'light' ? 'bg-gray-300' : 'bg-gray-700'}`}
+                            >
+                              <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm ${branding.isEnabled ? 'left-6' : 'left-1'}`} />
+                            </button>
+                          </div>
+                          <p className={`text-[11px] mt-1 ${textSecondary}`}>{branding.logoUrl ? t.branding : (t.csLogoDesc)}</p>
+                        </div>
+                      </div>
+                    </div>
+                    {/* Kennzeichen mit Logo */}
+                    <div className={`flex items-center justify-between p-3 rounded-xl ${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'}`}>
+                      <div>
+                        <span className={`text-sm ${textPrimary}`}>{t.csKennzeichenMitLogo}</span>
+                        <span className={`block text-xs ${textSecondary}`}>→ {t.csCustomKennzeichen}</span>
+                      </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">{t.proLabel}</span>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* 2. Studio Setup */}
+          <div className={`rounded-[28px] overflow-hidden transition-all duration-300 ${cardBase} ${cardStyle}`}>
+            <button
+              onClick={() => toggleCard('studio')}
+              className="w-full p-6 flex items-center gap-4 text-left"
+            >
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${theme === 'light' ? 'bg-violet-50 text-violet-600' : 'bg-violet-500/20 text-violet-400'}`}>
+                <Layers className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className={`text-base font-bold ${textPrimary}`}>{t.csStudioSetup}</h4>
+                <p className={`text-xs mt-0.5 ${textSecondary} truncate`}>{t.csStudioSetupDesc}</p>
+              </div>
+              <ChevronDown className={`w-5 h-5 shrink-0 transition-transform duration-300 ${textSecondary} ${expandedCards.has('studio') ? 'rotate-180' : ''}`} />
+            </button>
+            <AnimatePresence>
+              {expandedCards.has('studio') && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="overflow-hidden"
+                >
+                  <div className={`px-6 pb-6 space-y-4 border-t ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
+                    {/* Current Studio Preview */}
+                    <div className="pt-4">
+                      <span className={`text-[10px] font-black uppercase tracking-widest ${textSecondary}`}>{t.csPreferredStudio}</span>
+                      <div className={`mt-2 flex items-center gap-3 p-3 rounded-xl ${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'}`}>
+                        <div className="w-14 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10">
+                          <img src={selectedStudio.thumbnail} alt={selectedStudio.name} className="w-full h-full object-cover" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className={`text-sm font-bold block truncate ${textPrimary}`}>{t[selectedStudio.name] || selectedStudio.name}</span>
+                          <span className={`text-[11px] ${textSecondary}`}>{t['cat' + selectedStudio.category] || selectedStudio.category}</span>
+                        </div>
+                        <CheckCircle className="w-5 h-5 text-green-500 shrink-0" />
+                      </div>
+                    </div>
+                    {/* Custom Studio */}
+                    <div className={`flex items-center justify-between p-3 rounded-xl ${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'}`}>
+                      <div>
+                        <span className={`text-sm font-semibold ${textPrimary}`}>{t.csCustomStudio}</span>
+                        <div className={`text-xs mt-0.5 space-y-0.5 ${textSecondary}`}>
+                          <p>→ {t.cs3dWallLogo}</p>
+                          <p>→ {t.csCustomStudioEnv}</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">{t.proLabel}</span>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* 3. Camera / Pictures */}
+          <div className={`rounded-[28px] overflow-hidden transition-all duration-300 ${cardBase} ${cardStyle}`}>
+            <button
+              onClick={() => toggleCard('camera')}
+              className="w-full p-6 flex items-center gap-4 text-left"
+            >
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${theme === 'light' ? 'bg-amber-50 text-amber-600' : 'bg-amber-500/20 text-amber-400'}`}>
+                <Camera className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h4 className={`text-base font-bold ${textPrimary}`}>{t.csCameraPictures}</h4>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">{t.proLabel}</span>
+                </div>
+                <p className={`text-xs mt-0.5 ${textSecondary} truncate`}>{t.csCameraPicturesDesc}</p>
+              </div>
+              <ChevronDown className={`w-5 h-5 shrink-0 transition-transform duration-300 ${textSecondary} ${expandedCards.has('camera') ? 'rotate-180' : ''}`} />
+            </button>
+            <AnimatePresence>
+              {expandedCards.has('camera') && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="overflow-hidden"
+                >
+                  <div className={`px-6 pb-6 space-y-3 border-t ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
+                    <div className={`pt-4 flex items-center justify-between p-3 rounded-xl ${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'}`}>
+                      <span className={`text-sm ${textPrimary}`}>{t.csCustomAngle}</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">{t.proLabel}</span>
+                    </div>
+                    <div className={`flex items-center justify-between p-3 rounded-xl ${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'}`}>
+                      <span className={`text-sm ${textPrimary}`}>{t.csCustomBildreihenfolge}</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">{t.proLabel}</span>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* 4. Design */}
+          <div className={`rounded-[28px] overflow-hidden transition-all duration-300 ${cardBase} ${cardStyle}`}>
+            <button
+              onClick={() => toggleCard('design')}
+              className="w-full p-6 flex items-center gap-4 text-left"
+            >
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${theme === 'light' ? 'bg-pink-50 text-pink-600' : 'bg-pink-500/20 text-pink-400'}`}>
+                <Palette className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className={`text-base font-bold ${textPrimary}`}>{t.csDesign}</h4>
+                <p className={`text-xs mt-0.5 ${textSecondary} truncate`}>{t.csDesignDesc}</p>
+              </div>
+              <ChevronDown className={`w-5 h-5 shrink-0 transition-transform duration-300 ${textSecondary} ${expandedCards.has('design') ? 'rotate-180' : ''}`} />
+            </button>
+            <AnimatePresence>
+              {expandedCards.has('design') && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="overflow-hidden"
+                >
+                  <div className={`px-6 pb-6 space-y-3 border-t ${theme === 'light' ? 'border-gray-100' : 'border-white/5'}`}>
+                    <div className={`pt-4 flex items-center justify-between p-3 rounded-xl ${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'}`}>
+                      <span className={`text-sm ${textPrimary}`}>{t.csBildOverlays}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${theme === 'light' ? 'bg-gray-200 text-gray-500' : 'bg-white/10 text-gray-400'}`}>{t.comingSoon}</span>
+                    </div>
+                    <div className={`flex items-center justify-between p-3 rounded-xl ${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'}`}>
+                      <span className={`text-sm ${textPrimary}`}>{t.csBildDesignReihenfolge}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${theme === 'light' ? 'bg-gray-200 text-gray-500' : 'bg-white/10 text-gray-400'}`}>{t.comingSoon}</span>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* 5. DMS System Connection */}
+          <div className={`rounded-[28px] overflow-hidden transition-all duration-300 ${cardBase} ${cardStyle}`}>
+            <div className="p-6 flex items-center gap-4">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${theme === 'light' ? 'bg-cyan-50 text-cyan-600' : 'bg-cyan-500/20 text-cyan-400'}`}>
+                <Database className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h4 className={`text-base font-bold ${textPrimary}`}>{t.csDmsConnection}</h4>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">{t.proLabel}</span>
+                </div>
+                <p className={`text-xs mt-0.5 ${textSecondary}`}>{t.csDmsConnectionDesc}</p>
+              </div>
+              <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full shrink-0 ${theme === 'light' ? 'bg-gray-200 text-gray-500' : 'bg-white/10 text-gray-400'}`}>{t.comingSoon}</span>
+            </div>
+          </div>
+
         </div>
       </motion.section>
     </motion.div>

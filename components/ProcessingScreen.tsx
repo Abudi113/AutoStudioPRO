@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Order, StudioTemplate } from '../types';
 import { processCarImage } from '../services/geminiService';
+import { useCredits } from '../context/CreditsContext';
 
 interface ProcessingScreenProps {
   order: Order;
@@ -13,6 +14,7 @@ interface ProcessingScreenProps {
 }
 
 const ProcessingScreen: React.FC<ProcessingScreenProps> = ({ order, studio, onJobProcessed, onComplete, t, theme }) => {
+  const { deductCredit } = useCredits();
   const [processedCount, setProcessedCount] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const processingStarted = useRef(false);
@@ -37,7 +39,7 @@ const ProcessingScreen: React.FC<ProcessingScreenProps> = ({ order, studio, onJo
 
     const processAll = async () => {
       setLogs(prev => [...prev,
-      format(t.taskInitiated, { task: order.taskType.toUpperCase() }),
+      format(t.taskInitiated, { task: (order.taskType || 'PROCESSING').toUpperCase() }),
       format(t.batchQueued, { count: order.jobs.length })
       ]);
 
@@ -47,13 +49,19 @@ const ProcessingScreen: React.FC<ProcessingScreenProps> = ({ order, studio, onJo
 
       let count = 0;
       for (const job of order.jobs) {
+        // Add delay between images to avoid API rate limiting (not before the first one)
+        if (count > 0) {
+          setLogs(prev => [...prev, '⏳ Rate-limit cooldown (2s)...']);
+          await new Promise(r => setTimeout(r, 2000));
+        }
+
         const angleLabel = t[job.angle] || job.angle.replace(/_/g, ' ');
         setLogs(prev => [...prev, format(t.analyzingInfo, { angle: angleLabel })]);
 
         try {
           await new Promise(r => setTimeout(r, 600));
 
-          if (order.taskType === 'interior' || job.angle === 'interior') {
+          if (job.angle === 'INTERIOR_CAR' || job.angle === 'interior') {
             setLogs(prev => [...prev, t.processingInterior]);
           } else {
             const brandingText = order.branding?.isEnabled ? t.withBranding : '';
@@ -62,12 +70,14 @@ const ProcessingScreen: React.FC<ProcessingScreenProps> = ({ order, studio, onJo
 
           const result = await processCarImage(job.originalImage, studio.id, job.angle, order.taskType, order.branding);
           onJobProcessed(job.id, result, 'completed');
-
+          await deductCredit(); // deduct 1 credit per successful image
           setLogs(prev => [...prev, format(t.successEnhanced, { angle: angleLabel })]);
         } catch (e) {
+          const errorMsg = e instanceof Error ? e.message : String(e);
           console.error(`AI Error for job ${job.id}:`, e);
-          onJobProcessed(job.id, undefined, 'failed');
-          setLogs(prev => [...prev, format(t.errorFailed, { angle: angleLabel })]);
+          // Mark as failed — show the original image but with failed status so user knows
+          onJobProcessed(job.id, job.originalImage, 'failed');
+          setLogs(prev => [...prev, `❌ FAILED: ${angleLabel} — ${errorMsg.slice(0, 100)}`]);
         }
 
         count++;
@@ -88,7 +98,7 @@ const ProcessingScreen: React.FC<ProcessingScreenProps> = ({ order, studio, onJo
   const textTitle = theme === 'light' ? 'text-gray-900' : 'text-white';
 
   return (
-    <div className="max-w-4xl mx-auto min-h-[60vh] flex flex-col items-center justify-center py-10 px-4">
+    <div className="w-full min-h-[60vh] flex flex-col items-center justify-center py-10 px-4">
       <div className="w-24 h-24 md:w-32 md:h-32 relative mb-10">
         <div className={`absolute inset-0 rounded-full border-4 ${theme === 'light' ? 'border-gold-dark/20' : 'border-blue-600/20'}`}></div>
         <div

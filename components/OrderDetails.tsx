@@ -1,8 +1,28 @@
 
 import React, { useState } from 'react';
-import { Order, ProcessingJob } from '../types';
+import { Order, ProcessingJob, CameraAngle, StudioTemplate } from '../types';
+import { CAMERA_ANGLES } from '../constants';
 import { useAuth } from '../context/AuthContext';
 import AuthModal from './AuthModal';
+import JSZip from 'jszip';
+
+// Image categories that map to processing pipelines
+const IMAGE_CATEGORIES: { id: CameraAngle; label: string; icon: string }[] = [
+  { id: 'EXTERIOR_CAR', label: 'Exterior', icon: 'fa-car' },
+  { id: 'INTERIOR_CAR', label: 'Interior', icon: 'fa-car-side' },
+  { id: 'INTERIOR_DETAIL_CAR', label: 'Int. Detail', icon: 'fa-circle-dot' },
+  { id: 'DETAIL_CAR', label: 'Detail', icon: 'fa-magnifying-glass' },
+];
+
+// Auto-detect pipeline category from specific angle
+const angleToCategory = (angle?: CameraAngle): CameraAngle => {
+  if (!angle) return 'EXTERIOR_CAR';
+  if (['EXTERIOR_CAR', 'INTERIOR_CAR', 'INTERIOR_DETAIL_CAR', 'DETAIL_CAR'].includes(angle)) return angle;
+  if (angle === 'interior' || angle.startsWith('interior_')) return 'INTERIOR_CAR';
+  if (angle === 'detail') return 'DETAIL_CAR';
+  if (['door_open', 'trunk_open', 'hood_open'].includes(angle)) return 'DETAIL_CAR';
+  return 'EXTERIOR_CAR';
+};
 
 interface OrderDetailsProps {
   order: Order;
@@ -11,13 +31,19 @@ interface OrderDetailsProps {
   t: any;
   theme: 'light' | 'dark';
   onDownloadAttempt?: () => Promise<boolean> | boolean;
+  onRetryJob?: (jobId: string, category?: CameraAngle) => void;
+  onChangeAngle?: (jobId: string, newAngle: CameraAngle, category?: CameraAngle) => void;
 }
 
-const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t, theme, onDownloadAttempt }) => {
+const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t, theme, onDownloadAttempt, onRetryJob, onChangeAngle }) => {
   const [selectedJob, setSelectedJob] = useState<ProcessingJob | null>(order.jobs[0] || null);
   const [compareMode, setCompareMode] = useState<'after' | 'side-by-side'>('after');
   const [zoom, setZoom] = useState<number>(1);
   const imageRef = React.useRef<HTMLImageElement>(null);
+  const [showAnglePicker, setShowAnglePicker] = useState(false);
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [isZipping, setIsZipping] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<CameraAngle>('EXTERIOR_CAR');
 
   const handleZoomChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setZoom(parseFloat(e.target.value));
@@ -28,13 +54,32 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
   const textTitle = theme === 'light' ? 'text-gray-900' : 'text-white';
   const btnAccent = theme === 'light' ? 'bg-gold-dark hover:bg-gold-light' : 'bg-blue-600 hover:bg-blue-700';
 
-  const downloadImage = (base64: string, name: string, angle: string) => {
-    if (!base64) return;
+  const downloadImage = async (src: string, name: string, angle: string) => {
+    if (!src) return;
+
+    // If it's a URL (not base64), fetch it as a blob first
+    let imageDataUrl = src;
+    if (!src.startsWith('data:image/')) {
+      try {
+        const res = await fetch(src);
+        const blob = await res.blob();
+        imageDataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+      } catch (err) {
+        console.error('Failed to fetch image for download:', err);
+        // Fallback: open in new tab
+        window.open(src, '_blank');
+        return;
+      }
+    }
 
     // If zoom is 1, download original
     if (zoom === 1) {
       const link = document.createElement('a');
-      link.href = base64;
+      link.href = imageDataUrl;
       link.download = `AutoStudio_${name.replace(/\s+/g, '_')}_${angle}.png`;
       document.body.appendChild(link);
       link.click();
@@ -46,6 +91,7 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
+    img.crossOrigin = 'anonymous';
     img.onload = () => {
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
@@ -74,7 +120,7 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
         document.body.removeChild(link);
       }
     };
-    img.src = base64;
+    img.src = imageDataUrl;
   };
 
   const { user } = useAuth();
@@ -88,20 +134,94 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
 
     if (onDownloadAttempt && !(await onDownloadAttempt())) return;
     if (selectedJob?.processedImage) {
-      downloadImage(selectedJob.processedImage, order.title, selectedJob.angle);
+      await downloadImage(selectedJob.processedImage, order.title, selectedJob.angle);
     }
   };
 
-  const handleExport = () => {
+  // ── Instant ZIP download ──
+  const handleInstantZip = async () => {
     if (!user) {
       setShowAuthModal(true);
       return;
     }
-    onExport();
+
+    const completedJobs = order.jobs.filter(j => j.status === 'completed' && j.processedImage);
+    if (completedJobs.length === 0) return;
+
+    setIsZipping(true);
+    try {
+      const zip = new JSZip();
+
+      for (const job of completedJobs) {
+        const src = job.processedImage!;
+        let blob: Blob;
+
+        if (src.startsWith('data:')) {
+          // Convert base64 to blob
+          const res = await fetch(src);
+          blob = await res.blob();
+        } else {
+          // Fetch from URL
+          const res = await fetch(src);
+          blob = await res.blob();
+        }
+
+        const ext = blob.type.includes('png') ? 'png' : 'jpg';
+        const fileName = `${order.title.replace(/\s+/g, '_')}_${job.angle}.${ext}`;
+        zip.file(fileName, blob);
+      }
+
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${order.title.replace(/\s+/g, '_')}_all.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('ZIP export failed:', err);
+      alert('ZIP export failed. Please try again.');
+    } finally {
+      setIsZipping(false);
+    }
   };
 
+  // ── Retry handler ──
+  const handleRetry = () => {
+    if (selectedJob && onRetryJob) {
+      onRetryJob(selectedJob.id, selectedCategory);
+    }
+  };
+
+  // ── Angle change handler ──
+  const handleAngleChange = (newAngle: CameraAngle) => {
+    if (selectedJob && onChangeAngle) {
+      onChangeAngle(selectedJob.id, newAngle, selectedCategory);
+      setShowAnglePicker(false);
+    }
+  };
+
+  // Keep selectedJob in sync with order updates (e.g. after retry completes)
+  React.useEffect(() => {
+    if (selectedJob) {
+      const updated = order.jobs.find(j => j.id === selectedJob.id);
+      if (updated) setSelectedJob(updated);
+    }
+  }, [order.jobs]);
+
+  // Auto-detect category when switching images
+  React.useEffect(() => {
+    if (selectedJob) {
+      setSelectedCategory(angleToCategory(selectedJob.angle));
+    }
+  }, [selectedJob?.id]);
+
+  const isRetrying = selectedJob?.status === 'pending' || selectedJob?.status === 'processing';
+
   return (
-    <div className="max-w-7xl mx-auto flex flex-col min-h-full pb-8">
+    <div className="w-full flex flex-col min-h-full pb-8">
       {/* Dynamic Header */}
       <header className="mb-4 md:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-2">
         <div className="flex items-center gap-3">
@@ -118,10 +238,12 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={handleExport}
-            className={`flex-1 sm:flex-none px-6 py-3.5 rounded-2xl ${btnAccent} text-white text-sm font-black shadow-xl shadow-blue-900/10 transition-all flex items-center justify-center gap-3 active:scale-95`}
+            onClick={handleInstantZip}
+            disabled={isZipping}
+            className={`flex-1 sm:flex-none px-6 py-3.5 rounded-2xl ${btnAccent} text-white text-sm font-black shadow-xl shadow-blue-900/10 transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-60`}
           >
-            <i className="fa-solid fa-file-zipper"></i> {t.batchExport} (ZIP)
+            {isZipping ? <i className="fa-solid fa-sync animate-spin"></i> : <i className="fa-solid fa-file-zipper"></i>}
+            {isZipping ? 'Wird erstellt…' : `${t.batchExport} (ZIP)`}
           </button>
         </div>
       </header>
@@ -169,12 +291,63 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
               </div>
             </div>
 
-            <button
-              onClick={handleDownload}
-              className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl ${theme === 'light' ? 'bg-gold-dark text-white' : 'bg-white text-black'} text-[11px] font-black hover:scale-105 transition-transform shadow-lg shadow-black/20`}
-            >
-              <i className="fa-solid fa-download"></i> {t.downloadPhoto}
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Category Picker */}
+              {onRetryJob && (
+                <div className="relative">
+                  <button
+                    onClick={() => { setShowCategoryPicker(!showCategoryPicker); setShowAnglePicker(false); }}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${theme === 'light' ? 'bg-purple-500 text-white hover:bg-purple-600' : 'bg-purple-500/15 text-purple-400 border border-purple-500/30 hover:bg-purple-500/25'}`}
+                  >
+                    <i className={`fa-solid ${IMAGE_CATEGORIES.find(c => c.id === selectedCategory)?.icon || 'fa-car'}`}></i>
+                    {IMAGE_CATEGORIES.find(c => c.id === selectedCategory)?.label || 'Ext.'}
+                    <i className="fa-solid fa-chevron-down text-[8px]"></i>
+                  </button>
+                  {showCategoryPicker && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowCategoryPicker(false)} />
+                      <div className={`absolute top-full mt-2 right-0 z-50 rounded-2xl border shadow-2xl min-w-[160px] overflow-hidden ${theme === 'dark' ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
+                        {IMAGE_CATEGORIES.map((cat) => (
+                          <button
+                            key={cat.id}
+                            onClick={() => { setSelectedCategory(cat.id); setShowCategoryPicker(false); }}
+                            className={`w-full px-4 py-2.5 text-left text-[11px] font-bold flex items-center gap-3 transition-colors ${selectedCategory === cat.id
+                              ? (theme === 'dark' ? 'bg-purple-600/20 text-purple-400' : 'bg-purple-50 text-purple-600')
+                              : (theme === 'dark' ? 'text-gray-300 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50')
+                              }`}
+                          >
+                            <i className={`fa-solid ${cat.icon} w-4 text-center`}></i>
+                            {cat.label}
+                            {selectedCategory === cat.id && <i className="fa-solid fa-check ml-auto text-green-500 text-[9px]"></i>}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+
+              {/* Retry Button */}
+              {onRetryJob && (
+                <button
+                  onClick={handleRetry}
+                  disabled={isRetrying}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 ${theme === 'light' ? 'bg-orange-500 text-white hover:bg-orange-600' : 'bg-orange-500/15 text-orange-400 border border-orange-500/30 hover:bg-orange-500/25'}`}
+                >
+                  {isRetrying ? <i className="fa-solid fa-spinner animate-spin"></i> : <i className="fa-solid fa-rotate-right"></i>}
+                  {isRetrying ? 'Läuft…' : 'Retry'}
+                </button>
+              )}
+
+              {/* Download Photo */}
+              <button
+                onClick={handleDownload}
+                className={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl ${theme === 'light' ? 'bg-gold-dark text-white' : 'bg-white text-black'} text-[11px] font-black hover:scale-105 transition-transform shadow-lg shadow-black/20`}
+              >
+                <i className="fa-solid fa-download"></i> {t.downloadPhoto}
+              </button>
+            </div>
           </div>
 
           {/* Interactive Rendering Canvas */}
@@ -187,24 +360,24 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
                     src={selectedJob.processedImage || selectedJob.originalImage}
                     alt="Vehicle Render"
                     style={{ transform: `scale(${zoom})`, transition: 'transform 0.1s ease-out' }}
-                    className={`max-w-full max-h-full object-contain drop-shadow-[0_35px_35px_rgba(0,0,0,0.5)] ${!selectedJob.processedImage ? 'opacity-40 blur-sm' : 'opacity-100'}`}
+                    className={`max-w-full max-h-full object-contain drop-shadow-[0_35px_35px_rgba(0,0,0,0.5)] ${!selectedJob.processedImage || isRetrying ? 'opacity-40 blur-sm' : 'opacity-100'}`}
                   />
-                  {!selectedJob.processedImage && (
+                  {(!selectedJob.processedImage || isRetrying) && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
                       <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                      <p className="text-white text-[10px] font-black uppercase tracking-[0.2em] animate-pulse">{t.processingNeural}</p>
+                      <p className="text-white text-[10px] font-black uppercase tracking-[0.2em] animate-pulse">{isRetrying ? 'Retrying…' : t.processingNeural}</p>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="w-full h-full flex flex-col md:flex-row gap-6 p-2 md:p-6 animate-in slide-in-from-bottom-4 duration-500">
+                <div className="w-full h-full flex flex-col md:flex-row gap-4 p-2 md:p-4 animate-in slide-in-from-bottom-4 duration-500">
                   <div className="flex-1 relative group bg-black/40 rounded-3xl overflow-hidden border border-white/5 ring-1 ring-white/10">
                     <img src={selectedJob.originalImage} className="w-full h-full object-contain p-2" />
-                    <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-md text-white px-3 py-1.5 rounded-lg text-[9px] font-black tracking-widest border border-white/10 uppercase">{t.inputAsset}</div>
+                    <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md text-white px-3 py-1.5 rounded-lg text-[9px] font-black tracking-widest border border-white/10 uppercase">{t.inputAsset}</div>
                   </div>
                   <div className="flex-1 relative group bg-black/40 rounded-3xl overflow-hidden border border-white/5 ring-1 ring-white/10 shadow-2xl">
                     <img src={selectedJob.processedImage || selectedJob.originalImage} className={`w-full h-full object-contain p-2 ${!selectedJob.processedImage ? 'opacity-20' : ''}`} />
-                    <div className={`absolute top-4 left-4 ${theme === 'light' ? 'bg-gold-dark' : 'bg-blue-600'} text-white px-3 py-1.5 rounded-lg text-[9px] font-black tracking-widest uppercase shadow-xl`}>{t.aiRender}</div>
+                    <div className={`absolute top-3 left-3 ${theme === 'light' ? 'bg-gold-dark' : 'bg-blue-600'} text-white px-3 py-1.5 rounded-lg text-[9px] font-black tracking-widest uppercase shadow-xl`}>{t.aiRender}</div>
                     {!selectedJob.processedImage && (
                       <div className="absolute inset-0 flex items-center justify-center">
                         <i className="fa-solid fa-wand-magic-sparkles animate-pulse text-white/40 text-4xl"></i>
@@ -216,7 +389,7 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
             )}
           </div>
 
-          {/* Rapid Asset Browser - REFINED: Removed individual green download button */}
+          {/* Rapid Asset Browser */}
           <div className={`p-4 md:p-6 ${theme === 'light' ? 'bg-gray-50 border-t border-gray-200' : 'bg-[#0a0a0a] border-t border-white/5'} flex items-center gap-4 overflow-x-auto no-scrollbar scroll-smooth`}>
             {order.jobs.map((job) => (
               <div key={job.id} className="relative group shrink-0 py-2">
@@ -233,7 +406,7 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
                     {t[job.angle] || job.angle.replace(/_/g, ' ')}
                   </div>
 
-                  {job.status === 'pending' && (
+                  {(job.status === 'pending' || job.status === 'processing') && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/60">
                       <i className="fa-solid fa-spinner animate-spin text-white/50"></i>
                     </div>
@@ -275,6 +448,7 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
             </div>
           </div>
 
+
           <div className={`${cardBg} rounded-3xl border ${borderCol} p-6 shadow-xl`}>
             <h3 className={`text-sm font-black mb-5 ${textTitle}`}>{t.distributionReady}</h3>
             <div className="space-y-4">
@@ -286,10 +460,11 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
                 <p className="text-[10px] text-gray-500 mb-6 font-medium">{t.assetOptimizedDesc}</p>
 
                 <button
-                  onClick={handleExport}
-                  className={`w-full py-3 rounded-xl ${theme === 'light' ? 'bg-white border-gray-200 text-gray-900' : 'bg-white/5 border-white/10 text-white'} border text-[11px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all shadow-sm active:scale-95`}
+                  onClick={handleInstantZip}
+                  disabled={isZipping}
+                  className={`w-full py-3 rounded-xl ${theme === 'light' ? 'bg-white border-gray-200 text-gray-900' : 'bg-white/5 border-white/10 text-white'} border text-[11px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all shadow-sm active:scale-95 disabled:opacity-50`}
                 >
-                  {t.configureBatch}
+                  {isZipping ? 'Wird erstellt…' : t.configureBatch}
                 </button>
               </div>
 

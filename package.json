@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port 4200",
     "build": "vite build",
     "preview": "vite preview",
     "deploy:functions": "supabase functions deploy process-image --no-verify-jwt"
@@ -14,6 +14,7 @@
     "@stripe/stripe-js": "^8.7.0",
     "@supabase/supabase-js": "^2.95.3",
     "framer-motion": "^12.33.0",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.563.0",
     "node-fetch": "^3.3.2",
     "react": "^19.2.4",
@@ -25,6 +26,7 @@
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.24",
     "postcss": "^8.5.6",
+    "sharp": "^0.34.5",
     "supabase": "^2.75.5",
     "tailwindcss": "^3.4.19",
     "typescript": "~5.8.2",

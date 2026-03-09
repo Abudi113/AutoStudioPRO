@@ -15,6 +15,21 @@
   --primary: #0066FF;
 }
 
+html {
+  overflow-x: hidden;
+  /* Prevent horizontal overflow at the root level */
+  scrollbar-width: none;
+  /* Firefox — hide scrollbar */
+  -ms-overflow-style: none;
+  /* IE / Edge */
+}
+
+html::-webkit-scrollbar {
+  display: none;
+  /* Chrome / Safari / Opera GX */
+}
+
+
 /* Dark Mode - Default */
 html.dark {
   --background: #000000;
@@ -40,10 +55,31 @@ body {
   background-color: var(--background);
   color: var(--foreground);
   transition: background-color 0.3s ease, color 0.3s ease;
+
+  /* Hide scrollbar while keeping scroll functionality */
+  scrollbar-width: none;
+  /* Firefox */
+  -ms-overflow-style: none;
+  /* IE / Edge */
+}
+
+body::-webkit-scrollbar {
+  display: none;
+  /* Chrome / Safari / Opera */
 }
 
 @layer base {
   body {
     @apply bg-[var(--background)] text-[var(--foreground)];
   }
+}
+
+/* Camera angle strip — hide scrollbar, keep scroll functionality */
+.angle-strip-hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.angle-strip-hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }

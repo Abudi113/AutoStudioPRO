@@ -3,9 +3,17 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import CreateTool from '../components/CreateTool.tsx';
 import LandingPage from '../components/LandingPage.tsx';
 import AuthCallback from '../components/AuthCallback.tsx';
-import PricingPage from '../components/PricingPage.tsx';
+
 import ContactPage from '../components/ContactPage.tsx';
+import AboutPage from '../components/AboutPage.tsx';
+import PricingPage from '../components/PricingPage.tsx';
+import PricingSuccess from '../components/PricingSuccess.tsx';
 import Layout from '../components/Layout.tsx';
+import ProtectedRoute from '../components/ProtectedRoute.tsx';
+
+import PrivacyPolicy from '../components/PrivacyPolicy.tsx';
+
+import ScrollToTop from '../components/ScrollToTop.tsx';
 
 // Placeholder for Dashboard (Order History)
 const DashboardPlaceholder = () => (
@@ -19,10 +27,16 @@ const DashboardPlaceholder = () => (
 const AppRoutes: React.FC = () => {
     return (
         <BrowserRouter>
+            <ScrollToTop />
             <Routes>
                 <Route path="/" element={<Layout><LandingPage /></Layout>} />
-                <Route path="/pricing" element={<Layout><PricingPage /></Layout>} />
+                <Route path="/about" element={<Layout><AboutPage /></Layout>} />
+
+                <Route path="/pricing" element={<Layout><ProtectedRoute><PricingPage /></ProtectedRoute></Layout>} />
+                <Route path="/pricing/success" element={<Layout><ProtectedRoute><PricingSuccess /></ProtectedRoute></Layout>} />
+                <Route path="/pricing/cancel" element={<Layout><ProtectedRoute><PricingPage /></ProtectedRoute></Layout>} />
                 <Route path="/contact" element={<Layout><ContactPage /></Layout>} />
+                <Route path="/privacy" element={<Layout><PrivacyPolicy /></Layout>} />
                 <Route path="/auth" element={<AuthCallback />} />
                 <Route path="/dashboard" element={<Layout><CreateTool /></Layout>} />
                 {/* The existing App is now the "Create" tool */}

@@ -1,49 +1,109 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Mail, CheckCircle, ArrowRight } from 'lucide-react';
+import { X, Mail, Lock, User, Car, CheckCircle, ArrowRight, Zap, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useLanguage } from '../context/LanguageContext';
 
 interface AuthModalProps {
     isOpen: boolean;
     onClose: () => void;
-    title?: string;
-    description?: string;
+    defaultTab?: 'login' | 'register';
 }
 
-const AuthModal: React.FC<AuthModalProps> = ({
-    isOpen,
-    onClose,
-    title,
-    description
-}) => {
-    const { t } = useLanguage();
-    const { signIn } = useAuth();
+type Tab = 'login' | 'register';
+type LoginMode = 'password' | 'magic';
+
+const inputCls = `w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-500
+  focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all`;
+
+const Field: React.FC<{
+    icon: React.ReactNode;
+    type?: string;
+    placeholder: string;
+    value: string;
+    onChange: (v: string) => void;
+    required?: boolean;
+    min?: number;
+    max?: number;
+    rightEl?: React.ReactNode;
+}> = ({ icon, type = 'text', placeholder, value, onChange, required, min, max, rightEl }) => (
+    <div className="relative">
+        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">{icon}</div>
+        <input
+            type={type} placeholder={placeholder} value={value} required={required}
+            min={min} max={max}
+            onChange={e => onChange(e.target.value)}
+            className={`${inputCls} pl-11 ${rightEl ? 'pr-11' : ''}`}
+        />
+        {rightEl && <div className="absolute right-4 top-1/2 -translate-y-1/2">{rightEl}</div>}
+    </div>
+);
+
+const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, defaultTab = 'login' }) => {
+    const { signIn, signInWithPassword, signUp } = useAuth();
+
+    const [tab, setTab] = useState<Tab>(defaultTab);
+    const [loginMode, setLoginMode] = useState<LoginMode>('password');
+
+    // Shared
     const [email, setEmail] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [sent, setSent] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [done, setDone] = useState<string | null>(null); // success message
 
-    // Use props if provided, otherwise use translations
-    const displayTitle = title || t('authTitle');
-    const displayDesc = description || t('authDesc');
+    // Password login
+    const [password, setPassword] = useState('');
+    const [showPw, setShowPw] = useState(false);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        setError(null);
+    // Register extras
+    const [username, setUsername] = useState('');
+    const [inventory, setInventory] = useState('');
+    const [confirmPw, setConfirmPw] = useState('');
+    const [showConfirm, setShowConfirm] = useState(false);
 
-        try {
-            const { error } = await signIn(email);
-            if (error) throw error;
-            setSent(true);
-        } catch (err: any) {
-            setError(err.message || 'Failed to send login link');
-        } finally {
-            setLoading(false);
-        }
+    const reset = () => {
+        setError(null); setDone(null);
+        setEmail(''); setPassword(''); setConfirmPw('');
+        setUsername(''); setInventory(''); setLoading(false);
     };
+
+    const switchTab = (t: Tab) => { reset(); setTab(t); };
+
+    // ── Handlers ────────────────────────────────────────────────────────────
+
+    const handleLogin = async (e: React.FormEvent) => {
+        e.preventDefault(); setError(null); setLoading(true);
+        try {
+            if (loginMode === 'magic') {
+                const { error } = await signIn(email);
+                if (error) throw error;
+                setDone('Magic link sent! Check your inbox and click the link to sign in.');
+            } else {
+                const { error } = await signInWithPassword(email, password);
+                if (error) throw error;
+                onClose();
+            }
+        } catch (err: any) {
+            setError(err.message || 'Sign in failed. Please try again.');
+        } finally { setLoading(false); }
+    };
+
+    const handleRegister = async (e: React.FormEvent) => {
+        e.preventDefault(); setError(null);
+        if (password !== confirmPw) { setError('Passwords do not match.'); return; }
+        if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+        if (!username.trim()) { setError('Please enter a username.'); return; }
+        setLoading(true);
+        try {
+            const { error } = await signUp(email, password, username.trim(), parseInt(inventory) || 0);
+            if (error) throw error;
+            onClose(); // Auto-logged in, no email confirmation needed
+        } catch (err: any) {
+            setError(err.message || 'Registration failed. Please try again.');
+        } finally { setLoading(false); }
+    };
+
+    // ── Render ───────────────────────────────────────────────────────────────
 
     return (
         <AnimatePresence>
@@ -52,9 +112,7 @@ const AuthModal: React.FC<AuthModalProps> = ({
                     <div className="flex min-h-full items-center justify-center p-4">
                         {/* Backdrop */}
                         <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                             onClick={onClose}
                             className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[-1]"
                         />
@@ -64,76 +122,186 @@ const AuthModal: React.FC<AuthModalProps> = ({
                             initial={{ opacity: 0, scale: 0.95, y: 20 }}
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                            className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-2xl shadow-2xl p-6 md:p-8 relative z-10"
+                            className="w-full max-w-md bg-zinc-950 border border-white/10 rounded-2xl shadow-2xl relative overflow-hidden"
                         >
+                            {/* Subtle top glow */}
+                            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-px bg-gradient-to-r from-transparent via-blue-500 to-transparent" />
+
                             <button
                                 onClick={onClose}
-                                className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors"
+                                className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors z-10"
                             >
                                 <X className="w-5 h-5" />
                             </button>
 
-                            {!sent ? (
-                                <>
-                                    <div className="text-center mb-8">
-                                        <div className="w-12 h-12 bg-blue-600/20 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500">
-                                            <Mail className="w-6 h-6" />
-                                        </div>
-                                        <h2 className="text-2xl font-bold text-white mb-2">{displayTitle}</h2>
-                                        <p className="text-gray-400">{displayDesc}</p>
-                                        <div className="mt-4 inline-flex items-center gap-2 px-3 py-1 bg-green-500/10 border border-green-500/20 rounded-full text-green-400 text-xs font-bold">
-                                            <CheckCircle className="w-3 h-3" /> {t('includesFreeCredits')}
-                                        </div>
-                                    </div>
-
-                                    <form onSubmit={handleSubmit} className="space-y-4">
-                                        <div>
-                                            <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1">{t('labelEmail')}</label>
-                                            <input
-                                                type="email"
-                                                id="email"
-                                                required
-                                                value={email}
-                                                onChange={(e) => setEmail(e.target.value)}
-                                                placeholder={t('emailPlaceholder')}
-                                                className="w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
-                                            />
-                                        </div>
-
-                                        {error && (
-                                            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
-                                                {error}
-                                            </div>
-                                        )}
-
-                                        <button
-                                            type="submit"
-                                            disabled={loading}
-                                            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                        >
-                                            {loading ? t('sendingLink') : <>{t('continueEmail')} <ArrowRight className="w-4 h-4" /></>}
-                                        </button>
-                                    </form>
-                                    <p className="mt-6 text-center text-xs text-gray-500">
-                                        We'll email you a magic link for a password-free sign in.
-                                    </p>
-                                </>
-                            ) : (
-                                <div className="text-center py-8">
-                                    <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-6 text-green-500 animate-pulse">
+                            {/* Success state */}
+                            {done ? (
+                                <div className="p-8 text-center">
+                                    <div className="w-16 h-16 bg-green-500/15 rounded-full flex items-center justify-center mx-auto mb-5 text-green-400">
                                         <CheckCircle className="w-8 h-8" />
                                     </div>
-                                    <h2 className="text-2xl font-bold text-white mb-4">{t('checkInbox')}</h2>
-                                    <p className="text-gray-400 mb-8">
-                                        {t('magicLinkSent')} <span className="text-white font-medium">{email}</span>. Click it to confirm your account and get your credits.
-                                    </p>
-                                    <button
-                                        onClick={onClose}
-                                        className="w-full py-3 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl transition-colors border border-white/10"
-                                    >
-                                        {t('closeWindow')}
+                                    <h2 className="text-xl font-bold text-white mb-3">You're all set</h2>
+                                    <p className="text-gray-400 text-sm leading-relaxed mb-6">{done}</p>
+                                    <button onClick={onClose} className="w-full py-3 bg-white/10 hover:bg-white/15 text-white font-bold rounded-xl transition-colors border border-white/10">
+                                        Close
                                     </button>
                                 </div>
+                            ) : (
+                                <>
+                                    {/* Tab bar */}
+                                    <div className="flex border-b border-white/8">
+                                        {(['login', 'register'] as Tab[]).map(t => (
+                                            <button
+                                                key={t}
+                                                onClick={() => switchTab(t)}
+                                                className={`flex-1 py-4 text-sm font-bold tracking-wide uppercase transition-colors ${tab === t
+                                                    ? 'text-white border-b-2 border-blue-500 -mb-px'
+                                                    : 'text-gray-500 hover:text-gray-300'
+                                                    }`}
+                                            >
+                                                {t === 'login' ? 'Sign In' : 'Create Account'}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <div className="p-6 md:p-8">
+                                        {/* ── LOGIN ── */}
+                                        {tab === 'login' && (
+                                            <>
+                                                {/* Mode toggle */}
+                                                <div className="flex items-center gap-2 p-1 bg-white/5 rounded-xl mb-6">
+                                                    {(['password', 'magic'] as LoginMode[]).map(m => (
+                                                        <button
+                                                            key={m}
+                                                            onClick={() => { setLoginMode(m); setError(null); }}
+                                                            className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${loginMode === m
+                                                                ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
+                                                                : 'text-gray-400 hover:text-gray-200'
+                                                                }`}
+                                                        >
+                                                            {m === 'password' ? <><Lock className="w-3.5 h-3.5" /> Password</> : <><Zap className="w-3.5 h-3.5" /> Magic Link</>}
+                                                        </button>
+                                                    ))}
+                                                </div>
+
+                                                <form onSubmit={handleLogin} className="space-y-4">
+                                                    <Field icon={<Mail className="w-4 h-4" />} type="email" placeholder="Email address" value={email} onChange={setEmail} required />
+
+                                                    {loginMode === 'password' && (
+                                                        <Field
+                                                            icon={<Lock className="w-4 h-4" />}
+                                                            type={showPw ? 'text' : 'password'}
+                                                            placeholder="Password"
+                                                            value={password}
+                                                            onChange={setPassword}
+                                                            required
+                                                            rightEl={
+                                                                <button type="button" onClick={() => setShowPw(p => !p)} className="text-gray-500 hover:text-white transition-colors">
+                                                                    {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                                </button>
+                                                            }
+                                                        />
+                                                    )}
+
+                                                    {loginMode === 'magic' && (
+                                                        <p className="text-xs text-gray-500 -mt-1">We'll send a one-click sign-in link to your inbox — no password needed.</p>
+                                                    )}
+
+                                                    {error && (
+                                                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">{error}</div>
+                                                    )}
+
+                                                    <button type="submit" disabled={loading} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-2">
+                                                        {loading ? 'Please wait…' : loginMode === 'password' ? <><span>Sign In</span><ArrowRight className="w-4 h-4" /></> : <><Zap className="w-4 h-4" /><span>Send Magic Link</span></>}
+                                                    </button>
+                                                </form>
+
+                                                <p className="mt-5 text-center text-xs text-gray-500">
+                                                    No account?{' '}
+                                                    <button onClick={() => switchTab('register')} className="text-blue-400 hover:text-blue-300 font-semibold transition-colors">
+                                                        Create one
+                                                    </button>
+                                                </p>
+                                            </>
+                                        )}
+
+                                        {/* ── REGISTER ── */}
+                                        {tab === 'register' && (
+                                            <>
+                                                <p className="text-gray-400 text-sm mb-5">
+                                                    Set up your dealership account in seconds.
+                                                </p>
+                                                <form onSubmit={handleRegister} className="space-y-4">
+                                                    <Field icon={<User className="w-4 h-4" />} placeholder="Username / Dealership name" value={username} onChange={setUsername} required />
+                                                    <Field icon={<Mail className="w-4 h-4" />} type="email" placeholder="Email address" value={email} onChange={setEmail} required />
+                                                    <Field
+                                                        icon={<Lock className="w-4 h-4" />}
+                                                        type={showPw ? 'text' : 'password'}
+                                                        placeholder="Password (min 8 characters)"
+                                                        value={password}
+                                                        onChange={setPassword}
+                                                        required
+                                                        rightEl={
+                                                            <button type="button" onClick={() => setShowPw(p => !p)} className="text-gray-500 hover:text-white transition-colors">
+                                                                {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                            </button>
+                                                        }
+                                                    />
+                                                    <Field
+                                                        icon={<Lock className="w-4 h-4" />}
+                                                        type={showConfirm ? 'text' : 'password'}
+                                                        placeholder="Confirm password"
+                                                        value={confirmPw}
+                                                        onChange={setConfirmPw}
+                                                        required
+                                                        rightEl={
+                                                            <button type="button" onClick={() => setShowConfirm(p => !p)} className="text-gray-500 hover:text-white transition-colors">
+                                                                {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                            </button>
+                                                        }
+                                                    />
+
+                                                    {/* Car inventory */}
+                                                    <div>
+                                                        <label className="block text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">
+                                                            <Car className="w-3.5 h-3.5 inline mr-1.5" />Car inventory size
+                                                        </label>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {[['0–30', '15'], ['31–60', '45'], ['61–100', '80'], ['101–250', '175'], ['251+', '300']].map(([label, val]) => (
+                                                                <button
+                                                                    key={val}
+                                                                    type="button"
+                                                                    onClick={() => setInventory(val)}
+                                                                    className={`px-4 py-2 rounded-full text-xs font-bold border transition-all ${inventory === val
+                                                                        ? 'bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-500/20'
+                                                                        : 'bg-white/5 text-gray-400 border-white/10 hover:border-white/25'
+                                                                        }`}
+                                                                >
+                                                                    {label}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+
+                                                    {error && (
+                                                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">{error}</div>
+                                                    )}
+
+                                                    <button type="submit" disabled={loading} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-2">
+                                                        {loading ? 'Creating account…' : <><span>Create Account</span><ArrowRight className="w-4 h-4" /></>}
+                                                    </button>
+                                                </form>
+
+                                                <p className="mt-5 text-center text-xs text-gray-500">
+                                                    Already have an account?{' '}
+                                                    <button onClick={() => switchTab('login')} className="text-blue-400 hover:text-blue-300 font-semibold transition-colors">
+                                                        Sign in
+                                                    </button>
+                                                </p>
+                                            </>
+                                        )}
+                                    </div>
+                                </>
                             )}
                         </motion.div>
                     </div>

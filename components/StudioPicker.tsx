@@ -12,11 +12,13 @@ interface StudioPickerProps {
 }
 
 const StudioPicker: React.FC<StudioPickerProps> = ({ selectedStudio, onSelect, onNext, t, theme }) => {
+  // Ensure the currently selected studio appears first in the grid
+  const orderedPresets = [selectedStudio, ...STUDIO_PRESETS.filter(studio => studio.id !== selectedStudio.id)];
   const textTitle = theme === 'light' ? 'text-gray-900' : 'text-white';
   const btnAccent = 'bg-blue-600 hover:bg-blue-700 shadow-xl shadow-blue-900/20 text-white';
 
   return (
-    <div className="max-w-6xl mx-auto py-2 h-full flex flex-col px-1">
+    <div className="w-full py-2 h-full flex flex-col px-1">
       <header className="mb-12 flex flex-col sm:flex-row sm:items-center justify-between gap-8">
         <div className="text-center sm:text-left">
           <h2 className={`text-2xl md:text-4xl font-black mb-2 ${textTitle}`}>{t.selectStudio}</h2>
@@ -32,7 +34,7 @@ const StudioPicker: React.FC<StudioPickerProps> = ({ selectedStudio, onSelect, o
       </header>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 md:gap-14 flex-1 overflow-y-auto pr-1 pb-10">
-        {STUDIO_PRESETS.map((studio) => (
+        {orderedPresets.map((studio) => (
           <div
             key={studio.id}
             onClick={() => onSelect(studio)}

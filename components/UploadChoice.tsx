@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { CameraAngle } from '../types';
 import PhotoGuide from './PhotoGuide';
-import { HelpCircle, Car, Armchair, ZoomIn, Check, X } from 'lucide-react';
+import { HelpCircle, Car, Armchair, ZoomIn, Search, Check, X } from 'lucide-react';
 
 interface UploadChoiceProps {
   onSelectCamera: () => void;
@@ -80,7 +80,7 @@ const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadCom
   // TAGGING UI GRID
   if (isTagging) {
     return (
-      <div className="max-w-7xl mx-auto h-full flex flex-col py-6 px-4">
+      <div className="w-full h-full flex flex-col py-6 px-4">
         <header className="mb-8 flex justify-between items-center bg-[var(--card)]/50 p-6 rounded-2xl backdrop-blur-sm border border-[var(--border)]">
           <div>
             <h2 className="text-3xl font-black text-[var(--foreground)] mb-1">{t.tagYourPhotos}</h2>
@@ -113,10 +113,10 @@ const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadCom
                 </div>
               </div>
 
-              <div className="p-4 grid grid-cols-3 gap-2 flex-1 items-center">
+              <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 items-center">
                 <button
                   onClick={() => handleUpdateAngle(idx, 'EXTERIOR_CAR')}
-                  className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all ${item.angle === 'EXTERIOR_CAR' ? (theme === 'light' ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-600 text-white border-blue-600') : 'bg-[var(--background)] text-gray-500 border-[var(--border)] hover:bg-[var(--foreground)]/5'}`}
+                  className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all ${item.angle === 'EXTERIOR_CAR' ? 'bg-blue-600 text-white border-blue-600' : 'bg-[var(--background)] text-gray-500 border-[var(--border)] hover:bg-[var(--foreground)]/5'}`}
                 >
                   <Car className="w-5 h-5 mb-1" />
                   <span className="text-[10px] font-bold uppercase">{t.exterior}</span>
@@ -137,13 +137,21 @@ const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadCom
                   <ZoomIn className="w-5 h-5 mb-1" />
                   <span className="text-[10px] font-bold uppercase">{t.detail}</span>
                 </button>
+
+                <button
+                  onClick={() => handleUpdateAngle(idx, 'INTERIOR_DETAIL_CAR')}
+                  className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all ${item.angle === 'INTERIOR_DETAIL_CAR' ? 'bg-orange-600 text-white border-orange-600' : 'bg-[var(--background)] text-gray-500 border-[var(--border)] hover:bg-[var(--foreground)]/5'}`}
+                >
+                  <Search className="w-5 h-5 mb-1" />
+                  <span className="text-[10px] font-bold uppercase">{t.interiorDetail || 'Int. Detail'}</span>
+                </button>
               </div>
             </div>
           ))}
         </div>
 
         {/* Helper Footer */}
-        <div className={`fixed bottom-0 left-0 right-0 p-4 border-t backdrop-blur-md z-10 flex justify-center gap-8 text-xs font-medium text-gray-500 py-4 bg-[var(--background)]/90 border-[var(--border)]`}>
+        <div className={`fixed bottom-0 left-0 right-0 p-4 border-t backdrop-blur-md z-10 flex flex-wrap justify-center gap-4 sm:gap-8 text-xs font-medium text-gray-500 py-4 bg-[var(--background)]/90 border-[var(--border)]`}>
           <div className="flex items-center gap-2">
             <Car className="w-4 h-4 text-blue-500" />
             <span>{t.exteriorDesc}</span>
@@ -156,13 +164,17 @@ const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadCom
             <ZoomIn className="w-4 h-4 text-purple-500" />
             <span>{t.detailDesc}</span>
           </div>
+          <div className="flex items-center gap-2">
+            <Search className="w-4 h-4 text-orange-500" />
+            <span>{t.interiorDetailDesc || 'Interior close-ups: screens, controls, trim.'}</span>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto h-full flex flex-col justify-center py-6 px-4">
+    <div className="w-full h-full flex flex-col justify-center py-6 px-4">
       {/* Existing Return JSX */}
       <div className="absolute top-8 right-8">
         <button
