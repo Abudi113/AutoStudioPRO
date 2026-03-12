@@ -2006,9 +2006,10 @@ WHAT NEVER CHANGES:
     },
   });
 
-  const response1 = await model.generateContent({
-    contents: [{ role: "user", parts: parts1 }],
-  });
+  const response1 = await withRetry(
+    () => model.generateContent({ contents: [{ role: "user", parts: parts1 }] }),
+    "refineInterior-step1"
+  );
 
   const candidate1 = response1.response.candidates?.[0];
   const imagePart1 = candidate1?.content?.parts?.find((p: any) => p.inlineData);
@@ -2103,9 +2104,10 @@ ${branding?.isEnabled ? "\nBRANDING: Place the logo (Image 3) in the top-left co
     },
   });
 
-  const response2 = await model2.generateContent({
-    contents: [{ role: "user", parts: parts2 }],
-  });
+  const response2: any = await withRetry(
+    () => model2.generateContent({ contents: [{ role: "user", parts: parts2 }] }),
+    "refineInterior-step2"
+  );
 
   const candidate2 = response2.response.candidates?.[0];
   const imagePart2 = candidate2?.content?.parts?.find((p: any) => p.inlineData);
@@ -2303,9 +2305,10 @@ ${branding?.isEnabled ? "BRANDING: Logo (Image 3) top-left, small." : ""}`;
     },
   });
 
-  const response = await model.generateContent({
-    contents: [{ role: "user", parts }],
-  });
+  const response = await withRetry(
+    () => model.generateContent({ contents: [{ role: "user", parts }] }),
+    "refineDetailExterior"
+  );
 
   const candidate = response.response.candidates?.[0];
   const imagePart = candidate?.content?.parts?.find((p: any) => p.inlineData);
@@ -2410,7 +2413,8 @@ async function refineDetailInterior(
   try {
     response = await withRetry(
       () => model.generateContent({ contents: [{ role: "user", parts }] }),
-      `refineDetailInterior-step1 (${MODEL_IMAGE_INTERIOR})`
+      `refineDetailInterior-step1 (${MODEL_IMAGE_INTERIOR})`,
+      1  // Only 1 attempt on 3.1 — fail fast, fallback to stable model
     );
   } catch (primaryErr) {
     // Fallback to stable model
