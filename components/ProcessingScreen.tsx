@@ -17,6 +17,7 @@ const ProcessingScreen: React.FC<ProcessingScreenProps> = ({ order, studio, onJo
   const { deductCredit } = useCredits();
   const [processedCount, setProcessedCount] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const processingStarted = useRef(false);
 
   // Helper for simple interpolation
@@ -26,6 +27,18 @@ const ProcessingScreen: React.FC<ProcessingScreenProps> = ({ order, studio, onJo
       result = result.replace(`{${key}}`, String(params[key]));
     }
     return result;
+  };
+
+  // Elapsed time timer
+  useEffect(() => {
+    const interval = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0');
+    const s = (secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
   };
 
   useEffect(() => {
@@ -47,41 +60,52 @@ const ProcessingScreen: React.FC<ProcessingScreenProps> = ({ order, studio, onJo
         setLogs(prev => [...prev, t.brandDetected]);
       }
 
+      const BATCH_SIZE = Math.min(5, order.jobs.length);
+      setLogs(prev => [...prev, `⚡ Parallel mode: ${BATCH_SIZE} images at a time (${order.jobs.length} total)`]);
+
       let count = 0;
-      for (const job of order.jobs) {
-        // Add delay between images to avoid API rate limiting (not before the first one)
-        if (count > 0) {
+      for (let batchStart = 0; batchStart < order.jobs.length; batchStart += BATCH_SIZE) {
+        const batch = order.jobs.slice(batchStart, batchStart + BATCH_SIZE);
+
+        // Add delay between batches (not before the first)
+        if (batchStart > 0) {
           setLogs(prev => [...prev, '⏳ Rate-limit cooldown (2s)...']);
           await new Promise(r => setTimeout(r, 2000));
         }
 
-        const angleLabel = t[job.angle] || job.angle.replace(/_/g, ' ');
-        setLogs(prev => [...prev, format(t.analyzingInfo, { angle: angleLabel })]);
+        setLogs(prev => [...prev, `🚀 Processing batch ${Math.floor(batchStart / BATCH_SIZE) + 1}/${Math.ceil(order.jobs.length / BATCH_SIZE)} (${batch.length} images)...`]);
 
-        try {
-          await new Promise(r => setTimeout(r, 600));
+        // Fire all jobs in this batch in parallel
+        const results = await Promise.allSettled(
+          batch.map(async (job) => {
+            const angleLabel = job.angle === 'AUTO' ? 'Auto-Detect' : (t[job.angle] || job.angle.replace(/_/g, ' '));
+            setLogs(prev => [...prev, `🔍 ${format(t.analyzingInfo, { angle: angleLabel })} — KI erkennt Bildtyp automatisch...`]);
 
-          if (job.angle === 'INTERIOR_CAR' || job.angle === 'interior') {
-            setLogs(prev => [...prev, t.processingInterior]);
+            const result = await processCarImage(job.originalImage, studio.id, job.angle, order.taskType, order.branding);
+            return { job, result, angleLabel };
+          })
+        );
+
+        // Process results
+        for (const outcome of results) {
+          if (outcome.status === 'fulfilled') {
+            const { job, result, angleLabel } = outcome.value;
+            onJobProcessed(job.id, result, 'completed');
+            await deductCredit();
+            setLogs(prev => [...prev, format(t.successEnhanced, { angle: angleLabel })]);
           } else {
-            const brandingText = order.branding?.isEnabled ? t.withBranding : '';
-            setLogs(prev => [...prev, format(t.processingStudio, { branded: brandingText })]);
+            // Find which job failed (use index)
+            const idx = results.indexOf(outcome);
+            const job = batch[idx];
+            const angleLabel = job.angle === 'AUTO' ? 'Auto-Detect' : (t[job.angle] || job.angle.replace(/_/g, ' '));
+            const errorMsg = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+            console.error(`AI Error for job ${job.id}:`, outcome.reason);
+            onJobProcessed(job.id, job.originalImage, 'failed');
+            setLogs(prev => [...prev, `❌ FAILED: ${angleLabel} — ${errorMsg.slice(0, 100)}`]);
           }
-
-          const result = await processCarImage(job.originalImage, studio.id, job.angle, order.taskType, order.branding);
-          onJobProcessed(job.id, result, 'completed');
-          await deductCredit(); // deduct 1 credit per successful image
-          setLogs(prev => [...prev, format(t.successEnhanced, { angle: angleLabel })]);
-        } catch (e) {
-          const errorMsg = e instanceof Error ? e.message : String(e);
-          console.error(`AI Error for job ${job.id}:`, e);
-          // Mark as failed — show the original image but with failed status so user knows
-          onJobProcessed(job.id, job.originalImage, 'failed');
-          setLogs(prev => [...prev, `❌ FAILED: ${angleLabel} — ${errorMsg.slice(0, 100)}`]);
+          count++;
+          setProcessedCount(count);
         }
-
-        count++;
-        setProcessedCount(count);
       }
 
       setLogs(prev => [...prev, t.batchVerification, t.assetsReady, t.redirecting]);
@@ -111,7 +135,8 @@ const ProcessingScreen: React.FC<ProcessingScreenProps> = ({ order, studio, onJo
       </div>
 
       <h2 className={`text-2xl md:text-4xl font-black mb-3 text-center ${textTitle}`}>{t.processing}</h2>
-      <p className="text-gray-500 mb-10 text-center max-w-md text-sm md:text-lg font-medium">{t.identityLock}</p>
+      <p className="text-gray-500 mb-2 text-center max-w-md text-sm md:text-lg font-medium">{t.identityLock}</p>
+      <p className={`text-lg md:text-xl font-mono font-bold mb-10 ${accentColor} tabular-nums`}>⏱ {formatTime(elapsedSeconds)}</p>
 
       <div className={`${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'} border ${theme === 'light' ? 'border-gray-200' : 'border-white/10'} w-full rounded-[32px] overflow-hidden mb-10 shadow-2xl`}>
         <div className="p-8">

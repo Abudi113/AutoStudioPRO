@@ -78,7 +78,7 @@ const PLANS = [
 const ADDONS = [
     { images: 100, pricePerImage: 0.39, total: 39, label: 'Small Top-Up' },
     { images: 300, pricePerImage: 0.33, total: 99, label: 'Medium Top-Up' },
-    { images: 800, pricePerImage: 0.25, total: 199, label: 'Large Top-Up' },
+    { images: 500, pricePerImage: 0.29, total: 145, label: 'Large Top-Up' },
 ];
 
 // ─── Recommendation Calculator ───────────────────────────────────────────────

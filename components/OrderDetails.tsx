@@ -8,6 +8,7 @@ import JSZip from 'jszip';
 
 // Image categories that map to processing pipelines
 const IMAGE_CATEGORIES: { id: CameraAngle; label: string; icon: string }[] = [
+  { id: 'AUTO', label: 'Auto-Detect', icon: 'fa-wand-magic-sparkles' },
   { id: 'EXTERIOR_CAR', label: 'Exterior', icon: 'fa-car' },
   { id: 'INTERIOR_CAR', label: 'Interior', icon: 'fa-car-side' },
   { id: 'INTERIOR_DETAIL_CAR', label: 'Int. Detail', icon: 'fa-circle-dot' },
@@ -16,12 +17,12 @@ const IMAGE_CATEGORIES: { id: CameraAngle; label: string; icon: string }[] = [
 
 // Auto-detect pipeline category from specific angle
 const angleToCategory = (angle?: CameraAngle): CameraAngle => {
-  if (!angle) return 'EXTERIOR_CAR';
-  if (['EXTERIOR_CAR', 'INTERIOR_CAR', 'INTERIOR_DETAIL_CAR', 'DETAIL_CAR'].includes(angle)) return angle;
+  if (!angle) return 'AUTO';
+  if (['AUTO', 'EXTERIOR_CAR', 'INTERIOR_CAR', 'INTERIOR_DETAIL_CAR', 'DETAIL_CAR'].includes(angle)) return angle;
   if (angle === 'interior' || angle.startsWith('interior_')) return 'INTERIOR_CAR';
   if (angle === 'detail') return 'DETAIL_CAR';
   if (['door_open', 'trunk_open', 'hood_open'].includes(angle)) return 'DETAIL_CAR';
-  return 'EXTERIOR_CAR';
+  return 'AUTO';
 };
 
 interface OrderDetailsProps {
@@ -43,7 +44,7 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, onBack, onExport, t,
   const [showAnglePicker, setShowAnglePicker] = useState(false);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<CameraAngle>('EXTERIOR_CAR');
+  const [selectedCategory, setSelectedCategory] = useState<CameraAngle>('AUTO');
 
   const handleZoomChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setZoom(parseFloat(e.target.value));

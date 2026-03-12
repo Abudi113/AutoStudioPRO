@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { CameraAngle } from '../types';
 import PhotoGuide from './PhotoGuide';
-import { HelpCircle, Car, Armchair, ZoomIn, Search, Check, X } from 'lucide-react';
+import { HelpCircle } from 'lucide-react';
 
 interface UploadChoiceProps {
   onSelectCamera: () => void;
@@ -12,30 +12,14 @@ interface UploadChoiceProps {
   theme: 'light' | 'dark';
 }
 
-interface TaggingItem {
-  file: File;
-  base64: string;
-  angle: CameraAngle;
-}
-
 const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadComplete, onBack, t, theme }) => {
   const [showGuide, setShowGuide] = useState(false);
-
-  // Tagging State
-  const [taggingItems, setTaggingItems] = useState<TaggingItem[]>([]);
-  const [isTagging, setIsTagging] = useState(false);
-
-  // Use CSS variables and logical classes instead of JS conditional styles where possible for background/borders
-  // But keep accent colors conditional if they differ significantly in logic beyond simple semantic mapping
-
-  // Common styles mapped to CSS variables
-  const cardStyles = "bg-[var(--card)] border-[var(--border)] shadow-lg";
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
       const fileList = Array.from(files) as File[];
-      const newItems: TaggingItem[] = [];
+      const results: { angle: CameraAngle; data: string }[] = [];
 
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
@@ -45,133 +29,14 @@ const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadCom
           reader.readAsDataURL(file);
         });
 
-        // Default to EXTERIOR_CAR
-        newItems.push({
-          file,
-          base64,
-          angle: 'EXTERIOR_CAR'
-        });
+        // Auto-assign AUTO — the edge function will classify the image
+        results.push({ angle: 'AUTO', data: base64 });
       }
 
-      setTaggingItems(newItems);
-      setIsTagging(true);
+      // Skip tagging — go directly to processing
+      onUploadComplete(results);
     }
   };
-
-  const handleUpdateAngle = (index: number, newAngle: CameraAngle) => {
-    const updated = [...taggingItems];
-    updated[index].angle = newAngle;
-    setTaggingItems(updated);
-  };
-
-  const handleProcess = () => {
-    const results = taggingItems.map(item => ({
-      angle: item.angle,
-      data: item.base64
-    }));
-    onUploadComplete(results);
-  };
-
-  const handleCancelTagging = () => {
-    setTaggingItems([]);
-    setIsTagging(false);
-  };
-
-  // TAGGING UI GRID
-  if (isTagging) {
-    return (
-      <div className="w-full h-full flex flex-col py-6 px-4">
-        <header className="mb-8 flex justify-between items-center bg-[var(--card)]/50 p-6 rounded-2xl backdrop-blur-sm border border-[var(--border)]">
-          <div>
-            <h2 className="text-3xl font-black text-[var(--foreground)] mb-1">{t.tagYourPhotos}</h2>
-            <p className="text-gray-500 text-sm">{t.tagSubtitle}</p>
-          </div>
-          <div className="flex gap-4">
-            <button
-              onClick={handleCancelTagging}
-              className="px-6 py-3 rounded-xl font-bold text-sm bg-[var(--border)]/10 text-[var(--foreground)] hover:opacity-80 transition-all"
-            >
-              {t.cancel}
-            </button>
-            <button
-              onClick={handleProcess}
-              className="flex items-center gap-2 px-8 py-3 rounded-xl font-bold text-sm text-white shadow-lg transform hover:scale-105 transition-all bg-blue-600 hover:bg-blue-500"
-            >
-              <i className="fa-solid fa-wand-magic-sparkles"></i>
-              {t.startProcessing} ({taggingItems.length})
-            </button>
-          </div>
-        </header>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 overflow-y-auto pb-20">
-          {taggingItems.map((item, idx) => (
-            <div key={idx} className={`relative group ${cardStyles} rounded-2xl overflow-hidden flex flex-col`}>
-              <div className="relative aspect-[4/3] bg-gray-900 border-b border-[var(--border)]">
-                <img src={item.base64} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt="Upload" />
-                <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-md px-3 py-1 rounded-lg border border-white/10">
-                  <span className="text-xs font-bold text-white uppercase tracking-wider">{item.angle.replace('_CAR', '')}</span>
-                </div>
-              </div>
-
-              <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 items-center">
-                <button
-                  onClick={() => handleUpdateAngle(idx, 'EXTERIOR_CAR')}
-                  className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all ${item.angle === 'EXTERIOR_CAR' ? 'bg-blue-600 text-white border-blue-600' : 'bg-[var(--background)] text-gray-500 border-[var(--border)] hover:bg-[var(--foreground)]/5'}`}
-                >
-                  <Car className="w-5 h-5 mb-1" />
-                  <span className="text-[10px] font-bold uppercase">{t.exterior}</span>
-                </button>
-
-                <button
-                  onClick={() => handleUpdateAngle(idx, 'INTERIOR_CAR')}
-                  className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all ${item.angle === 'INTERIOR_CAR' ? 'bg-green-600 text-white border-green-600' : 'bg-[var(--background)] text-gray-500 border-[var(--border)] hover:bg-[var(--foreground)]/5'}`}
-                >
-                  <Armchair className="w-5 h-5 mb-1" />
-                  <span className="text-[10px] font-bold uppercase">{t.interior}</span>
-                </button>
-
-                <button
-                  onClick={() => handleUpdateAngle(idx, 'DETAIL_CAR')}
-                  className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all ${item.angle === 'DETAIL_CAR' ? 'bg-purple-600 text-white border-purple-600' : 'bg-[var(--background)] text-gray-500 border-[var(--border)] hover:bg-[var(--foreground)]/5'}`}
-                >
-                  <ZoomIn className="w-5 h-5 mb-1" />
-                  <span className="text-[10px] font-bold uppercase">{t.detail}</span>
-                </button>
-
-                <button
-                  onClick={() => handleUpdateAngle(idx, 'INTERIOR_DETAIL_CAR')}
-                  className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all ${item.angle === 'INTERIOR_DETAIL_CAR' ? 'bg-orange-600 text-white border-orange-600' : 'bg-[var(--background)] text-gray-500 border-[var(--border)] hover:bg-[var(--foreground)]/5'}`}
-                >
-                  <Search className="w-5 h-5 mb-1" />
-                  <span className="text-[10px] font-bold uppercase">{t.interiorDetail || 'Int. Detail'}</span>
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Helper Footer */}
-        <div className={`fixed bottom-0 left-0 right-0 p-4 border-t backdrop-blur-md z-10 flex flex-wrap justify-center gap-4 sm:gap-8 text-xs font-medium text-gray-500 py-4 bg-[var(--background)]/90 border-[var(--border)]`}>
-          <div className="flex items-center gap-2">
-            <Car className="w-4 h-4 text-blue-500" />
-            <span>{t.exteriorDesc}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Armchair className="w-4 h-4 text-green-500" />
-            <span>{t.interiorDesc}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <ZoomIn className="w-4 h-4 text-purple-500" />
-            <span>{t.detailDesc}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Search className="w-4 h-4 text-orange-500" />
-            <span>{t.interiorDetailDesc || 'Interior close-ups: screens, controls, trim.'}</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="w-full h-full flex flex-col justify-center py-6 px-4">
@@ -187,7 +52,7 @@ const UploadChoice: React.FC<UploadChoiceProps> = ({ onSelectCamera, onUploadCom
       </div>
       <header className="mb-20 text-center">
         <h2 className="text-3xl md:text-5xl font-black mb-4 text-[var(--foreground)] tracking-tight">{t.howToProceed}</h2>
-        <p className="text-gray-500 text-base md:text-lg font-medium">{t.tagSubtitle}</p>
+        <p className="text-gray-500 text-base md:text-lg font-medium">{t.uploadSubtitle || 'Lade deine Fotos hoch — die KI erkennt den Bildtyp automatisch.'}</p>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-24 mb-20">

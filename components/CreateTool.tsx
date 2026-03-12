@@ -6,8 +6,7 @@ import { TaskType, Order, StudioTemplate, ProcessingJob, CameraAngle, BrandingCo
 import { processCarImage } from '../services/geminiService';
 import Dashboard from './Dashboard';
 import CameraCapture from './CameraCapture';
-// VIN process — temporarily disabled, code preserved in VinScanner.tsx
-// import VinScanner from './VinScanner';
+import VinScanner from './VinScanner';
 import StudioPicker from './StudioPicker';
 import ProcessingScreen from './ProcessingScreen';
 import OrderDetails from './OrderDetails';
@@ -22,7 +21,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { saveProject, saveJobImage, createProjectRecord, loadProjects, loadProjectById, deleteProject, renameProject } from '../services/projectsService';
 import { Link, useSearchParams } from 'react-router-dom';
 
-type ViewState = 'dashboard' | 'camera' | 'studio' | 'processing' | 'order-details' | 'batch-export' | 'upload-choice';
+type ViewState = 'dashboard' | 'project-name' | 'camera' | 'studio' | 'processing' | 'order-details' | 'batch-export' | 'upload-choice' | 'vin-scan';
 
 const CreateTool: React.FC = () => {
     const { user, session } = useAuth();
@@ -39,8 +38,8 @@ const CreateTool: React.FC = () => {
     const [branding, setBranding] = useState<BrandingConfig>({ logoUrl: null, isEnabled: true });
     const savedProjectIds = useRef<Set<string>>(new Set());
     const [showNoCreditsModal, setShowNoCreditsModal] = useState(false);
-    // VIN process disabled — preserved for future use
-    // const [vinInput, setVinInput] = useState('');
+    const [vinInput, setVinInput] = useState('');
+    const [projectName, setProjectName] = useState('');
     const [showRotateModal, setShowRotateModal] = useState(false);
     const [loadingProjects, setLoadingProjects] = useState(true);
 
@@ -133,7 +132,7 @@ const CreateTool: React.FC = () => {
         setActiveTask(task);
         const newOrder: Order = {
             id: crypto.randomUUID(),
-            title: `${task.label} ${orders.length + 1}`,
+            title: '',
             vin: '',
             createdAt: new Date().toISOString(),
             status: 'draft',
@@ -143,8 +142,21 @@ const CreateTool: React.FC = () => {
             branding: { ...branding }
         };
         setCurrentOrder(newOrder);
+        setProjectName('');
+        setVinInput('');
+        setView('project-name');
+    };
 
-        if (task.id === 'bg-replacement' || task.id === 'interior') {
+    const handleProjectNameContinue = () => {
+        if (!currentOrder || !projectName.trim()) return;
+        const title = projectName.trim();
+        const updated = { ...currentOrder, title, vin: vinInput.trim() };
+        setCurrentOrder(updated);
+        setOrders(prev => {
+            const exists = prev.find(o => o.id === updated.id);
+            return exists ? prev.map(o => o.id === updated.id ? updated : o) : [updated, ...prev];
+        });
+        if (currentOrder.taskType === 'bg-replacement' || currentOrder.taskType === 'interior') {
             setView('studio');
         } else {
             setView('upload-choice');
@@ -162,15 +174,13 @@ const CreateTool: React.FC = () => {
         setView('upload-choice');
     };
 
-    // VIN process disabled — handler preserved for future use
-    // const handleVinComplete = (vin: string) => {
-    //     if (currentOrder) {
-    //         const updated = { ...currentOrder, vin, title: vin };
-    //         setCurrentOrder(updated);
-    //         setOrders(prev => prev.map(o => o.id === currentOrder.id ? { ...o, vin, title: vin } : o));
-    //     }
-    //     setView('upload-choice');
-    // };
+    const handleVinComplete = (vin: string) => {
+        setVinInput(vin);
+        if (!projectName.trim()) {
+            setProjectName(vin);
+        }
+        setView('project-name');
+    };
 
     const handleCaptureComplete = (images: { angle: CameraAngle; data: string }[]) => {
         if (currentOrder) {
@@ -190,7 +200,7 @@ const CreateTool: React.FC = () => {
 
             setCurrentOrder(updatedOrder);
             setOrders(prev => [updatedOrder, ...prev.filter(o => o.id !== updatedOrder.id)]);
-            // setVinInput(''); // VIN disabled
+            setVinInput('');
             setView('processing');
 
             // Create project record in Supabase in the background (non-blocking)
@@ -365,6 +375,7 @@ const CreateTool: React.FC = () => {
 
     // Step indicator logic
     const STEPS = [
+        { label: 'Projekt', views: ['project-name', 'vin-scan'] },
         { label: 'Studio', views: ['studio'] },
         { label: 'Fotos', views: ['upload-choice', 'camera'] },
         { label: 'Verarbeitung', views: ['processing'] },
@@ -535,63 +546,108 @@ const CreateTool: React.FC = () => {
                 </div>
             )}
 
-            {/* VIN process disabled — code preserved in VinScanner.tsx
-            {view === 'vin-entry' && (
-                <div className="max-w-lg mx-auto mt-8 animate-in fade-in duration-500">
-                    <button
-                        onClick={() => setView('upload-choice')}
-                        className={`mb-6 flex items-center gap-2 text-sm font-medium ${theme === 'dark' ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-gray-900'} transition-colors`}
-                    >
-                        ← {t.back || 'Back'}
-                    </button>
-
-                    <div className={`rounded-3xl border p-8 ${theme === 'dark' ? 'bg-[#111]/80 border-white/10' : 'bg-white border-gray-200'}`}>
-                        <div className="text-center mb-6">
-                            <div className="text-4xl mb-3">🔢</div>
-                            <h2 className={`text-2xl font-black ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
-                                {t.vinTitle || 'Vehicle Identification'}
+            {view === 'project-name' && (
+                <div className="max-w-lg mx-auto mt-4 animate-in fade-in duration-500">
+                    <div className={`rounded-3xl border p-6 sm:p-8 ${theme === 'dark' ? 'bg-[#111]/80 border-white/10' : 'bg-white border-gray-200'}`}>
+                        {/* Header */}
+                        <div className="text-center mb-8">
+                            <h2 className={`text-2xl sm:text-3xl font-black tracking-tight ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+                                Projektname
                             </h2>
                             <p className={`text-sm mt-2 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                                {t.vinSubtitle || 'Enter the VIN to identify the vehicle (optional)'}
+                                Gib deinem Projekt einen Namen.
                             </p>
                         </div>
 
-                        <input
-                            type="text"
-                            value={vinInput}
-                            onChange={(e) => setVinInput(e.target.value.toUpperCase())}
-                            placeholder={t.vinPlaceholder || 'e.g. WVWZZZ3CZWE123456'}
-                            maxLength={17}
-                            className={`w-full px-4 py-3 rounded-xl text-center font-mono text-lg tracking-widest border focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${theme === 'dark'
-                                ? 'bg-white/5 border-white/10 text-white placeholder-gray-600'
-                                : 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400'
-                                }`}
-                        />
+                        {/* Project Name Input */}
+                        <div className="mb-8">
+                            <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                                Projektname <span className="text-red-400">*</span>
+                            </label>
+                            <input
+                                type="text"
+                                value={projectName}
+                                onChange={(e) => setProjectName(e.target.value)}
+                                placeholder={activeTask ? `${activeTask.label} ${orders.length + 1}` : 'z.B. BMW 3er Schwarz'}
+                                className={`w-full px-4 py-3.5 rounded-2xl border-2 text-base font-medium focus:outline-none transition-all ${theme === 'dark'
+                                    ? 'bg-white/5 border-white/10 text-white placeholder-gray-600 focus:border-blue-500'
+                                    : 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400 focus:border-blue-500'
+                                    }`}
+                                autoFocus
+                            />
+                        </div>
 
-                        <div className="flex flex-col gap-3 mt-6">
+                        {/* VIN Section */}
+                        <div className="mb-8">
+                            <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                                VIN (optional)
+                            </label>
+                            <p className={`text-xs mb-3 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
+                                Scanne oder gib die VIN ein, um das Projekt automatisch zu benennen.
+                            </p>
+
+                            {/* VIN Scan Button */}
                             <button
-                                onClick={() => {
-                                    if (vinInput.trim()) {
-                                        handleVinComplete(vinInput.trim());
-                                    }
-                                }}
-                                disabled={!vinInput.trim()}
-                                className={`w-full py-3 rounded-2xl font-bold transition-all ${vinInput.trim()
-                                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                onClick={() => setView('vin-scan')}
+                                className={`w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-2xl font-bold text-sm border-2 border-dashed transition-all ${theme === 'dark'
+                                    ? 'border-white/10 text-gray-300 hover:border-blue-500/50 hover:text-blue-400 hover:bg-blue-500/5'
+                                    : 'border-gray-200 text-gray-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50'
+                                    }`}
+                            >
+                                📷 VIN scannen
+                            </button>
+
+                            <div className={`flex items-center gap-3 my-3 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-300'}`}>
+                                <div className="flex-1 h-px bg-current" />
+                                <span className="text-xs font-medium uppercase tracking-wider">oder</span>
+                                <div className="flex-1 h-px bg-current" />
+                            </div>
+
+                            {/* Manual VIN Input */}
+                            <input
+                                type="text"
+                                value={vinInput}
+                                onChange={(e) => setVinInput(e.target.value.toUpperCase())}
+                                placeholder="z.B. WVWZZZ3CZWE123456"
+                                maxLength={17}
+                                className={`w-full px-4 py-3 rounded-2xl border-2 text-sm font-mono tracking-widest focus:outline-none transition-all ${theme === 'dark'
+                                    ? 'bg-white/5 border-white/10 text-white placeholder-gray-600 focus:border-blue-500'
+                                    : 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400 focus:border-blue-500'
+                                    }`}
+                            />
+                            {vinInput.trim() && (
+                                <div className="flex justify-end mt-1.5 px-1">
+                                    <span className={`text-xs ${vinInput.replace(/[\s\-]/g, '').length === 17 ? 'text-green-500 font-medium' : theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
+                                        {vinInput.replace(/[\s\-]/g, '').length} / 17
+                                        {vinInput.replace(/[\s\-]/g, '').length === 17 && ' ✓'}
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex flex-col gap-3">
+                            <button
+                                onClick={handleProjectNameContinue}
+                                disabled={!projectName.trim()}
+                                className={`w-full py-3.5 rounded-2xl font-bold text-base transition-all ${projectName.trim()
+                                    ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/20'
                                     : theme === 'dark'
                                         ? 'bg-white/5 text-gray-600 cursor-not-allowed'
                                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                     }`}
                             >
-                                {t.vinContinue || 'Continue with VIN'} →
+                                Weiter →
                             </button>
-
                             <button
-                                onClick={() => setView('vin-scan')}
-                                className={`w-full py-2 text-sm transition-all ${theme === 'dark' ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'
-                                    }`}
+                                onClick={() => {
+                                    setCurrentOrder(null);
+                                    setActiveTask(null);
+                                    setView('dashboard');
+                                }}
+                                className={`w-full py-2.5 rounded-2xl text-sm font-medium transition-all ${theme === 'dark' ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`}
                             >
-                                📷 {t.vinScanInstead || 'Scan VIN with camera instead'}
+                                ← Zurück
                             </button>
                         </div>
                     </div>
@@ -601,11 +657,10 @@ const CreateTool: React.FC = () => {
             {view === 'vin-scan' && (
                 <VinScanner
                     onComplete={handleVinComplete}
-                    onBack={() => setView('vin-entry')}
+                    onBack={() => setView('project-name')}
                     theme={theme}
                 />
             )}
-            */}
 
             {view === 'camera' && (
                 <CameraCapture
