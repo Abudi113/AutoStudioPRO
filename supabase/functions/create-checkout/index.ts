@@ -8,9 +8,9 @@
 //   growth   → 299 €/mo  → replace PRICE_GROWTH below
 //   pro      → 699 €/mo  → replace PRICE_PRO below
 // One-time add-ons:
-//   addon_100  → 39 €    → replace PRICE_ADDON_100 below
+//   addon_100  → 39 €    → price_1SyfQKIYHtY4sN4xuO3b7tgG
 //   addon_300  → 99 €    → replace PRICE_ADDON_300 below
-//   addon_800  → 199 €   → replace PRICE_ADDON_800 below
+//   addon_500  → 145 €   → replace PRICE_ADDON_500 below
 // ─────────────────────────────────────────────────────────────
 
 const CORS = {
@@ -25,17 +25,17 @@ const STRIPE_PRICES: Record<string, { priceId: string; mode: "subscription" | "p
     starter: { priceId: "price_1T4QEwIJEJVuNvynxLyfSigi", mode: "subscription" },   // TODO: update to new €99/mo price
     growth: { priceId: "price_1T4QG5IJEJVuNvynXf6vFt5d", mode: "subscription" },    // TODO: update to new €299/mo price
     pro: { priceId: "price_1T4QH1IJEJVuNvynH5XSrQ6n", mode: "subscription" },       // TODO: update to new €699/mo price
-    addon_100: { priceId: "REPLACE_ME_ADDON_100", mode: "payment" },    // 100 images → €39
-    addon_300: { priceId: "REPLACE_ME_ADDON_300", mode: "payment" },    // 300 images → €99
-    addon_800: { priceId: "REPLACE_ME_ADDON_800", mode: "payment" },    // 800 images → €199
+    addon_100: { priceId: "price_1SyfQKIYHtY4sN4xuO3b7tgG", mode: "payment" },    // 100 images → €39
+    addon_300: { priceId: "price_1SyfQsIYHtY4sN4xs8d4OnEb", mode: "payment" },    // 300 images → €99
+    addon_500: { priceId: "price_1SyfRHIYHtY4sN4xsUASpMjC", mode: "payment" },    // 500 images → €145
 };
 // ── LIVE Price IDs (switch back for production) ──
 // starter:    price_1SydaeIYHtY4sN4xO1Jk9QyF   // TODO: update to new €99/mo price
 // growth:     price_1SyedYIYHtY4sN4xxG5QVfMO    // TODO: update to new €299/mo price
 // pro:        price_1SyedyIYHtY4sN4x4Dz4wSF8   // TODO: update to new €699/mo price
-// addon_100:  REPLACE_ME   // 100 images → €39
-// addon_300:  REPLACE_ME   // 300 images → €99
-// addon_800:  REPLACE_ME   // 800 images → €199
+// addon_100:  price_1SyfQKIYHtY4sN4xuO3b7tgG   // 100 images → €39
+// addon_300:  price_1SyfQsIYHtY4sN4xs8d4OnEb   // 300 images → €99
+// addon_500:  price_1SyfRHIYHtY4sN4xsUASpMjC   // 500 images → €145
 
 Deno.serve(async (req) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });

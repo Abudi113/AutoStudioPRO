@@ -17,7 +17,7 @@ const CREDITS_MAP: Record<string, number> = {
     pro: 3000,
     addon_100: 100,
     addon_300: 300,
-    addon_800: 800,
+    addon_500: 500,
 };
 
 Deno.serve(async (req) => {
