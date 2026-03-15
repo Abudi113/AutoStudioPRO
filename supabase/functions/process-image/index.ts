@@ -1,2651 +1,2397 @@
-// ============================================================
-// AUTOMOTIVE STUDIO COMPOSITOR — Supabase Edge Function
-// Optimized for consistency with Gemini image generation
-// ============================================================
-
 // @ts-ignore
-import { GoogleGenerativeAI } from "npm:@google/generative-ai";
+import {
+  GoogleGenAI,
+  createPartFromUri,
+  HarmBlockThreshold,
+  HarmCategory,
+  type SafetySetting,
+} from "npm:@google/genai";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// -----------------------------------------------------------
-// MODEL CONFIG
-// -----------------------------------------------------------
 const MODEL_IMAGE = "gemini-2.5-flash-image";
-const MODEL_IMAGE_INTERIOR = "gemini-3.1-flash-image-preview";  // Interior detail model (Dev B)
-//const MODEL_VISION = "gemini-1.5-pro";
-//const MODEL_IMAGE = "gemini-3-pro-image-preview";
-//const MODEL_VISION = "gemini-1.5-pro";
+const MODEL_IMAGE_INTERIOR = "gemini-3.1-flash-image-preview";
 const MODEL_VISION = "gemini-2.5-flash";
 const REMBG_API = "https://api.remove.bg/v1.0/removebg";
+const STORAGE_BUCKET = "project-images";
+const CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.85;
 const RETRY_ATTEMPTS = 3;
-const RETRY_BASE_DELAY_MS = 2000;
+const RETRY_BASE_DELAY_MS = 1200;
+const RETRY_QUOTA_DELAY_MS = 20000; // 20s base for 429/quota errors
+const INTER_CALL_DELAY_MS = 1500; // pause between sequential model calls
+const ROUTE_VERSION = "2026-03-08";
+const PROMPT_VERSION = "2026-03-09-reflection-quality-v27";
 
-// -----------------------------------------------------------
-// RETRY HELPER — exponential backoff for flaky model calls
-// -----------------------------------------------------------
-async function withRetry<T>(fn: () => Promise<T>, label: string, attempts = RETRY_ATTEMPTS): Promise<T> {
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn();
-    } catch (err: any) {
-      const msg = err?.message || String(err);
-      const is500 = msg.includes("500") || msg.includes("Internal Server Error") || msg.includes("internal error");
-      const is429 = msg.includes("429") || msg.includes("quota") || msg.includes("RESOURCE_EXHAUSTED");
-      const isRetryable = is500 || is429;
-
-      if (!isRetryable || i === attempts - 1) {
-        console.error(`❌ [RETRY] ${label} failed after ${i + 1}/${attempts} attempts: ${msg.slice(0, 150)}`);
-        throw err;
-      }
-
-      const delay = RETRY_BASE_DELAY_MS * Math.pow(2, i) + Math.random() * 1000;
-      console.warn(`⚠️ [RETRY] ${label} attempt ${i + 1}/${attempts} failed (${is500 ? '500' : '429'}). Retrying in ${Math.round(delay)}ms...`);
-      await new Promise(r => setTimeout(r, delay));
-    }
-  }
-  throw new Error(`[RETRY] ${label}: should not reach here`);
-}
+const SAFETY_SETTINGS: SafetySetting[] = [
+  {
+    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+];
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// -----------------------------------------------------------
-// ENTRY POINT
-// -----------------------------------------------------------
+const CLASSIFICATION_SCHEMA = {
+  type: "object",
+  properties: {
+    category: {
+      type: "string",
+      enum: [
+        "EXTERIOR",
+        "EXTERIOR_DETAIL",
+        "INTERIOR",
+        "INTERIOR_DETAIL",
+        "REJECT",
+      ],
+    },
+    confidence: { type: "number" },
+    subject_type: {
+      type: "string",
+      enum: ["full_vehicle", "cabin", "component", "invalid"],
+    },
+    angle_family: {
+      type: "string",
+      enum: [
+        "front",
+        "rear",
+        "side",
+        "three_quarter",
+        "interior",
+        "detail",
+        "unknown",
+      ],
+    },
+    crop_lock: { type: "boolean" },
+    notes: {
+      type: "array",
+      items: { type: "string" },
+    },
+    quality_issues: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: [
+          "none",
+          "photographer_visible",
+          "photographer_reflection",
+          "camera_obstruction",
+          "motion_blur",
+          "out_of_focus",
+          "severe_noise",
+          "underexposed",
+          "overexposed",
+          "flash_glare",
+        ],
+      },
+    },
+  },
+  required: [
+    "category",
+    "confidence",
+    "subject_type",
+    "angle_family",
+    "crop_lock",
+    "notes",
+    "quality_issues",
+  ],
+};
+
+const QA_SCHEMA = {
+  type: "object",
+  properties: {
+    pass: { type: "boolean" },
+    issues: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: [
+          "geometry_changed",
+          "hallucinated_part",
+          "plate_mismatch",
+          "paint_shift",
+          "crop_changed",
+          "outdoor_reflection_left",
+          "windshield_outdoor_content",
+          "body_panel_outdoor_reflection",
+          "shadow_mismatch",
+          "studio_surrounding_mismatch",
+          "interior_structure_changed",
+          "interior_color_changed",
+          "interior_content_lost",
+          "window_outdoor_content_remaining",
+          "window_studio_not_visible",
+          "interior_lighting_mismatch",
+          "zoom_or_crop_drift",
+          "angle_or_direction_changed",
+          "wheel_design_changed",
+          "badge_text_changed",
+          "caliper_color_changed",
+          "trim_altered",
+          "component_detail_lost",
+          "material_texture_changed",
+          "cleanup_artifact_remaining",
+          "not_4_3",
+          "category_mismatch",
+          "low_confidence",
+        ],
+      },
+    },
+    severity: { type: "string", enum: ["low", "medium", "high"] },
+    retry_recommended: { type: "boolean" },
+  },
+  required: ["pass", "issues", "severity", "retry_recommended"],
+};
+
+type QualityIssue =
+  | "none"
+  | "photographer_visible"
+  | "photographer_reflection"
+  | "camera_obstruction"
+  | "motion_blur"
+  | "out_of_focus"
+  | "severe_noise"
+  | "underexposed"
+  | "overexposed"
+  | "flash_glare";
+
+type ClassificationResult = {
+  category:
+  | "EXTERIOR"
+  | "EXTERIOR_DETAIL"
+  | "INTERIOR"
+  | "INTERIOR_DETAIL"
+  | "REJECT";
+  confidence: number;
+  subject_type: "full_vehicle" | "cabin" | "component" | "invalid";
+  angle_family:
+  | "front"
+  | "rear"
+  | "side"
+  | "three_quarter"
+  | "interior"
+  | "detail"
+  | "unknown";
+  crop_lock: boolean;
+  notes: string[];
+  quality_issues: QualityIssue[];
+};
+
+type QAEvaluation = {
+  pass: boolean;
+  issues: string[];
+  severity: "low" | "medium" | "high";
+  retry_recommended: boolean;
+};
+
+type StudioHints = {
+  lightingProfile: string;
+  studioTone: string;
+  floorFinish: string;
+  exposureNote: string;
+  platformType: string;
+  name: string;
+};
+
+type QualityReference = {
+  imageBase64: string;
+  label: string;
+};
+
+type JobRow = {
+  id: string;
+  project_id: string;
+  user_id: string;
+  original_image_url: string;
+  original_angle: string;
+  studio_id: string;
+  classification_override: string | null;
+  attempt_count: number;
+};
+
+type SupabaseClientAny = any;
+
+function stripDataPrefix(base64: string): string {
+  return base64.includes(",") ? base64.split(",")[1] : base64;
+}
+
+function detectMimeType(image: string): string {
+  if (image.startsWith("data:image/png")) return "image/png";
+  if (image.startsWith("data:image/webp")) return "image/webp";
+  return "image/jpeg";
+}
+
+function decodeBase64(base64: string): Uint8Array {
+  const clean = stripDataPrefix(base64);
+  const binary = atob(clean);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  // Plain for-loop avoids per-element JS callback overhead of Uint8Array.from
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function buildDataUri(bytes: Uint8Array, mimeType: string): string {
+  // Process in 32 KB chunks via String.fromCharCode.apply to avoid the
+  // O(n²) per-byte string-concatenation that was killing the CPU budget.
+  const CHUNK = 0x8000; // 32 768 bytes
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    // @ts-ignore – spread into apply is intentional here
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return `data:${mimeType};base64,${btoa(binary)}`;
+}
+
+function getImagePart(image: string) {
+  return {
+    inlineData: {
+      data: stripDataPrefix(image),
+      mimeType: detectMimeType(image),
+    },
+  };
+}
+
+function validateImageOutput(base64Data: string, label: string): void {
+  const cleanData = stripDataPrefix(base64Data);
+
+  // Reject tiny responses (< 5KB base64) which are typical for API degradation/429s returning 1x1 or error icons
+  if (cleanData.length < 5000) {
+    throw new Error(
+      `[${label}] Image output too small (${cleanData.length} chars). Potential API degradation or rate limit.`,
+    );
+  }
+
+  // Magic bytes check
+  if (
+    !cleanData.startsWith("iVBORw0KGgo") &&
+    !cleanData.startsWith("/9j/") &&
+    !cleanData.startsWith("UklGR")
+  ) {
+    console.warn(
+      `[${label}] Possible image corruption: missing JPG/PNG/WEBP magic bytes (${cleanData.substring(0, 10)}...)`,
+    );
+  }
+}
+
+function isTransientError(message: string): boolean {
+  return [
+    "500",
+    "503",
+    "429",
+    "overloaded",
+    "UNAVAILABLE",
+    "INTERNAL",
+    "RESOURCE_EXHAUSTED",
+    "fetch",
+    "SendRequest",
+    "connection error",
+    "close_notify",
+    "TLS",
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "error reading",
+    "body from connection",
+    "unexpected eof",
+  ].some((token) => message.toLowerCase().includes(token.toLowerCase()));
+}
+
+function isQuotaError(message: string): boolean {
+  return (
+    message.includes("429") ||
+    message.toLowerCase().includes("resource_exhausted") ||
+    message.toLowerCase().includes("quota")
+  );
+}
+
+async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      const message = String(error);
+      if (!isTransientError(message) || attempt === RETRY_ATTEMPTS) {
+        break;
+      }
+      // 429 / quota errors need a much longer wait than ordinary transient errors.
+      // Standard backoff (1.2 s, 2.4 s) is far too short for Google's rate-limit
+      // reset window, so we use 20 s / 40 s for quota exhaustion.
+      const isQuota = isQuotaError(message);
+      const delay = isQuota
+        ? RETRY_QUOTA_DELAY_MS * attempt // 20 s, 40 s
+        : RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1); // 1.2 s, 2.4 s
+      console.warn(
+        `[${label}] attempt ${attempt} failed (${isQuota ? "QUOTA" : "transient"}). Retrying in ${delay}ms.`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
+/** Small pause injected between sequential model calls to reduce burst rate. */
+async function interCallDelay(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, INTER_CALL_DELAY_MS));
+}
+
+async function fetchImageAsDataUri(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${url}`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const mimeType = response.headers.get("content-type") || "image/jpeg";
+  return buildDataUri(bytes, mimeType);
+}
+
+async function uploadImageToStorage(
+  supabase: SupabaseClientAny,
+  path: string,
+  image: string,
+): Promise<string> {
+  const bytes = decodeBase64(image);
+  const contentType = detectMimeType(image);
+  const { error } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .upload(path, bytes, {
+      contentType,
+      upsert: true,
+    });
+  if (error) throw error;
+  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
+async function ensureStudioFile(
+  ai: GoogleGenAI,
+  supabase: SupabaseClientAny,
+  studioId: string,
+  studioImageBase64: string,
+): Promise<{ uri: string; mimeType: string } | null> {
+  try {
+    const { data: studio } = await supabase
+      .from("studio_catalog")
+      .select("id,gemini_file_uri,gemini_file_name")
+      .eq("studio_id", studioId)
+      .maybeSingle();
+
+    if (studio?.gemini_file_uri && studio?.gemini_file_name) {
+      return {
+        uri: studio.gemini_file_uri,
+        mimeType: detectMimeType(studioImageBase64),
+      };
+    }
+
+    const bytes = decodeBase64(studioImageBase64);
+    const buffer = Uint8Array.from(bytes).buffer as ArrayBuffer;
+    const blob = new Blob([buffer], {
+      type: detectMimeType(studioImageBase64),
+    });
+    const uploaded = await ai.files.upload({
+      file: blob,
+      config: {
+        mimeType: blob.type,
+        displayName: `studio-${studioId}`,
+      },
+    });
+
+    await supabase
+      .from("studio_catalog")
+      .update({
+        gemini_file_uri: uploaded.uri,
+        gemini_file_name: uploaded.name,
+      })
+      .eq("studio_id", studioId);
+
+    return uploaded.uri ? { uri: uploaded.uri, mimeType: blob.type } : null;
+  } catch (error) {
+    console.warn(
+      "[studio-file-cache] Falling back to inline studio image:",
+      error,
+    );
+    return null;
+  }
+}
+
+function createStudioPart(
+  studioImageBase64: string,
+  studioFile: { uri: string; mimeType: string } | null,
+) {
+  if (studioFile?.uri) {
+    return createPartFromUri(studioFile.uri, studioFile.mimeType);
+  }
+  return getImagePart(studioImageBase64);
+}
+
+async function classifyImage(
+  ai: GoogleGenAI,
+  originalBase64: string,
+  originalAngle: string,
+): Promise<ClassificationResult> {
+  const response = await withRetry("classifyImage", () =>
+    ai.models.generateContent({
+      model: MODEL_VISION,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: [
+                "Classify this automotive photo for a studio retouch pipeline.",
+                "",
+                "TASK 1 — CATEGORY: Choose from EXTERIOR, EXTERIOR_DETAIL, INTERIOR, INTERIOR_DETAIL, REJECT.",
+                "  • EXTERIOR: any shot where the vehicle body (or significant portion of it) is visible from outside — including close-up front/rear/side shots, three-quarter views, and partial car shots where the vehicle fills most of the frame. When in doubt between EXTERIOR and EXTERIOR_DETAIL, prefer EXTERIOR.",
+                "  • EXTERIOR_DETAIL: ONLY use this for an isolated single component shot — e.g. a wheel arch close-up with NO body panels visible, a badge close-up, or a headlight unit photographed in isolation. If the car body, bonnet, or door panels are visible anywhere in the frame, use EXTERIOR instead.",
+                "  • INTERIOR: full cabin/interior shot.",
+                "  • INTERIOR_DETAIL: close-up of a specific interior component (gauge cluster, stitching, screen, etc.).",
+                "  • REJECT: no vehicle present, completely unusable.",
+                "  crop_lock = true for detail shots or any view where crop must stay identical.",
+                "  Use the provided angle only as a weak hint, never as the final truth.",
+                "",
+                "TASK 2 — QUALITY ISSUES: Inspect the photo carefully and list ALL quality problems present.",
+                "  • photographer_visible: a person's hands, arms, body, or phone device is directly visible in the frame.",
+                "  • photographer_reflection: the photographer's silhouette, hands, or phone is reflected in the car's painted panels, chrome trim, glass, mirrors, instrument-cluster glass, infotainment screens, glossy piano-black trim, glossy wood trim, or chrome bezels.",
+                "  • camera_obstruction: a finger, phone case edge, or other object partially blocks the lens/frame edge.",
+                "  • motion_blur: the image is blurry due to camera shake or movement during capture.",
+                "  • out_of_focus: the main subject (vehicle/component) is soft or unfocused.",
+                "  • severe_noise: the image is very grainy or noisy (typical of low-light phone shots).",
+                "  • underexposed: the image is too dark to clearly see vehicle details.",
+                "  • overexposed: large areas are blown out / pure white with lost detail.",
+                "  • flash_glare: harsh flash reflection creates a bright glare spot on the vehicle surface.",
+                "  • none: the image is clean with none of the above issues.",
+                '  List every issue that is present. If the image is clean, return ["none"].',
+              ].join("\n"),
+            },
+            { text: `Original angle hint: ${originalAngle || "unknown"}` },
+            getImagePart(originalBase64),
+          ],
+        },
+      ],
+      config: {
+        temperature: 0,
+        responseMimeType: "application/json",
+        responseJsonSchema: CLASSIFICATION_SCHEMA,
+      },
+    }),
+  );
+
+  const data = JSON.parse(response.text || "{}");
+  const rawIssues: string[] = Array.isArray(data.quality_issues)
+    ? data.quality_issues
+    : ["none"];
+  const validIssues: QualityIssue[] = rawIssues.filter(
+    (i: string): i is QualityIssue =>
+      [
+        "none",
+        "photographer_visible",
+        "photographer_reflection",
+        "camera_obstruction",
+        "motion_blur",
+        "out_of_focus",
+        "severe_noise",
+        "underexposed",
+        "overexposed",
+        "flash_glare",
+      ].includes(i),
+  );
+  return {
+    category: data.category || "REJECT",
+    confidence: typeof data.confidence === "number" ? data.confidence : 0,
+    subject_type: data.subject_type || "invalid",
+    angle_family: data.angle_family || "unknown",
+    crop_lock: Boolean(data.crop_lock),
+    notes: Array.isArray(data.notes) ? data.notes : [],
+    quality_issues: validIssues.length > 0 ? validIssues : ["none"],
+  };
+}
+
+// Build a targeted inpainting prompt for each quality issue type.
+// Following Google's official guidance: one concern per pass, using
+// "change only X, keep everything else exactly the same" pattern.
+function buildCleanupPrompt(issue: QualityIssue): string {
+  const prompts: Record<QualityIssue, string> = {
+    none: "",
+    photographer_visible: [
+      "Using the provided image, remove the visible photographer — including any hands, arms, fingers, phone device, or body parts that are directly visible in the frame.",
+      "Fill the area where they were with the natural continuation of the vehicle surface, interior, or background that would realistically be there.",
+      "Keep everything else in the image exactly the same: vehicle shape, paint color, all vehicle details, framing, and composition.",
+      "Do not change the input aspect ratio.",
+    ].join(" "),
+    photographer_reflection: [
+      "Using the provided image, remove the photographer's reflection — including any reflected silhouette, hands, phone device, or dark human-shaped outline visible in the car's painted panels, chrome trim, glass, mirrors, instrument-cluster covers, infotainment screens, glossy piano-black trim, glossy wood trim, or chrome bezels.",
+      "On interior glossy surfaces, replace the human reflection with a clean studio-consistent highlight or the true underlying display/material detail that should be visible there with no person present.",
+      "Preserve all screen content, digits, icons, text, gauge markings, and trim geometry exactly. Do not blur, blank, simplify, or redesign any display or reflective component.",
+      "Keep everything else in the image exactly the same: vehicle geometry, paint color, all surface details, framing, and composition.",
+      "Do not change the input aspect ratio.",
+    ].join(" "),
+    camera_obstruction: [
+      "Using the provided image, remove any physical obstruction at the frame edges — including fingers, hand edges, phone case corners, or lens obstructions partially blocking the view.",
+      "Fill the obscured area with the natural continuation of whatever is behind it (vehicle body, background, etc.).",
+      "Keep everything else in the image exactly the same.",
+      "Do not change the input aspect ratio.",
+    ].join(" "),
+    motion_blur: [
+      "Using the provided image, correct the motion blur throughout the image to produce a sharp, clear photograph.",
+      "Restore fine surface details on the vehicle — panel edges, badging, wheel spokes, texture — as they would appear in a sharp capture from the same angle.",
+      "Keep the composition, framing, vehicle shape, colors, and all content exactly the same. Do not add or remove any elements.",
+      "Do not change the input aspect ratio.",
+    ].join(" "),
+    out_of_focus: [
+      "Using the provided image, correct the soft focus so that the main automotive subject is sharp and in focus.",
+      "Restore visible surface details — paint texture, badge lettering, trim edges, stitching — as they would appear in a properly focused capture.",
+      "Keep the composition, framing, colors, and all content exactly the same. Do not add or remove any elements.",
+      "Do not change the input aspect ratio.",
+    ].join(" "),
+    severe_noise: [
+      "Using the provided image, reduce the severe digital noise and grain to produce a clean, smooth photograph.",
+      "Preserve all underlying vehicle detail — do not smooth away real surface texture, badge text, or structural edges.",
+      "Keep the composition, framing, colors, and all content exactly the same.",
+      "Do not change the input aspect ratio.",
+    ].join(" "),
+    underexposed: [
+      "Using the provided image, correct the underexposure to reveal full vehicle detail.",
+      "Brighten shadow areas naturally so that vehicle paint, trim, interior leather, dashboard surfaces, seat textures, and all materials are clearly visible with full detail, matching a properly exposed professional photograph.",
+      "Recover detail in dark footwells, door pockets, lower dashboard areas, and seat creases.",
+      "Keep the composition, framing, and all content exactly the same. Do not change colors beyond restoring natural brightness.",
+      "Do not change the input aspect ratio.",
+    ].join(" "),
+    overexposed: [
+      "Using the provided image, correct the overexposure by recovering blown-out highlight areas.",
+      "Restore detail in bright surfaces — paint highlights, window glass, light-colored trim, leather seat highlights, dashboard gloss, steering wheel shine, and any interior surface where texture detail has been lost to overexposure.",
+      "Ensure material textures (leather grain, stitching, perforations, wood grain, brushed metal) are visible in previously blown-out areas.",
+      "Keep the composition, framing, and all content exactly the same. Do not change colors beyond restoring natural tones.",
+      "Do not change the input aspect ratio.",
+    ].join(" "),
+    flash_glare: [
+      "Using the provided image, remove the harsh flash glare spots from the vehicle surfaces.",
+      "Replace each glare spot with the natural paint color, surface texture, and ambient reflection that would appear in that area without direct flash.",
+      "Keep everything else in the image exactly the same: vehicle shape, all other colors, composition, and framing.",
+      "Do not change the input aspect ratio.",
+    ].join(" "),
+  };
+  return prompts[issue] || "";
+}
+
+async function cleanupImage(
+  ai: GoogleGenAI,
+  imageBase64: string,
+  issues: QualityIssue[],
+): Promise<string> {
+  // Filter out 'none' — only process real issues
+  const actionableIssues = issues.filter((i) => i !== "none");
+  if (actionableIssues.length === 0) return imageBase64;
+
+  let current = imageBase64;
+
+  // Process one issue at a time — Google recommends single-concern edits per pass
+  for (const issue of actionableIssues) {
+    const promptText = buildCleanupPrompt(issue);
+    if (!promptText) continue;
+
+    console.log(`[cleanup] Running pass for issue: ${issue}`);
+    try {
+      const response: any = await withRetry(`cleanup:${issue}`, () =>
+        ai.models.generateContent({
+          model: MODEL_IMAGE,
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: promptText },
+                { text: "Image — the automotive photo to clean up" },
+                getImagePart(current),
+              ],
+            },
+          ],
+          config: {
+            temperature: 0.05,
+            topP: 0.1,
+            topK: 5,
+            candidateCount: 1,
+            responseModalities: ["Image"],
+            safetySettings: SAFETY_SETTINGS,
+          },
+        }),
+      );
+
+      const imagePart = response.candidates?.[0]?.content?.parts?.find(
+        (part: any) => part.inlineData?.data,
+      );
+      if (imagePart?.inlineData?.data) {
+        validateImageOutput(imagePart.inlineData.data, `cleanup:${issue}`);
+        current = `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
+        console.log(`[cleanup] Pass for ${issue} succeeded.`);
+      } else {
+        console.warn(
+          `[cleanup] Pass for ${issue} produced no image output — skipping.`,
+        );
+      }
+    } catch (err) {
+      // If a cleanup pass fails, log and continue with the previous image
+      console.warn(
+        `[cleanup] Pass for ${issue} failed, continuing with previous image:`,
+        err,
+      );
+    }
+    await interCallDelay();
+  }
+
+  return current;
+}
+
+async function qaEvaluate(
+  ai: GoogleGenAI,
+  originalBase64: string,
+  studioImageBase64: string,
+  generatedBase64: string,
+  category: string,
+  studioHints?: StudioHints,
+): Promise<QAEvaluation> {
+  const isDark = studioHints?.studioTone === "dark";
+  const isInterior = category === "INTERIOR" || category === "INTERIOR_DETAIL";
+  const isDetail =
+    category === "EXTERIOR_DETAIL" || category === "INTERIOR_DETAIL";
+
+  const structuralChecks = [
+    "• geometry_changed: Vehicle/component shape, proportions, or camera angle differ from Image 1.",
+    "• hallucinated_part: Details were added that don't exist in Image 1 (extra vents, changed grille, altered bodywork).",
+    "• plate_mismatch: License plate text or design changed.",
+    "• paint_shift: Vehicle paint color/finish noticeably changed.",
+    "• crop_changed: Framing significantly different from expected output.",
+    "• wheel_design_changed: Spoke count, spoke shape, spoke finish, or centre cap badge differs from Image 1. Compare carefully.",
+    "• badge_text_changed: Any badge text (model name, ABT, M, AMG, S-line, etc.) differs from Image 1.",
+    "• caliper_color_changed: Brake caliper color/shape differs from Image 1 (e.g. was red, now black).",
+    "• trim_altered: Exterior trim (chrome, black trim, carbon fiber) shape or finish changed.",
+    "• zoom_or_crop_drift: Image is zoomed in/out compared to Image 1, or panned to a different position.",
+    "• angle_or_direction_changed: The vehicle/component is seen from a DIFFERENT camera angle or the vehicle faces a different direction than in Image 1. For example: Image 1 shows a direct front view but Image 3 shows a three-quarter view, or the car faces left in Image 1 but right in Image 3. This is an AUTOMATIC FAILURE.",
+  ];
+
+  const exteriorEnvChecks = [
+    "• outdoor_reflection_left: ANY outdoor content visible in body panel reflections, chrome, or mirrors.",
+    "• windshield_outdoor_content: Sky, trees, buildings, or outdoor light visible THROUGH any glass.",
+    "• body_panel_outdoor_reflection: Outdoor scenery reflected in painted surfaces.",
+    "• shadow_mismatch: Shadows don't match Image 2's lighting.",
+    "• studio_surrounding_mismatch: Background around car doesn't match Image 2's studio.",
+    isDark
+      ? "• DARK STUDIO: Bright outdoor artifacts on dark paint/glass are automatic failures."
+      : "",
+  ].filter(Boolean);
+
+  const interiorChecks = [
+    "• window_outdoor_content_remaining: ANY outdoor content (sky, trees, buildings, sun glare, parking lot, road, other cars) is still visible through ANY window — windshield, side windows, rear window, sunroof, or mirrors. This is an AUTOMATIC FAILURE — every window must show studio environment, not outdoors.",
+    "• window_studio_not_visible: Windows show a flat/blank/white/grey fill instead of Image 2's actual studio walls, ceiling, and space. Windows must clearly show the studio geometry — not just a uniform color wash. HIGH severity.",
+    "• interior_lighting_mismatch: Interior lighting does not match Image 2's studio ambiance. If Image 2 is a dark studio, interior should have moody/atmospheric lighting. If bright studio, interior should be evenly well-lit. Flag if the interior lighting feels inconsistent with the studio.",
+    "• interior_color_changed: ANY material color HUE changed (brown became orange, black became grey, tan became white). Compare leather, fabric, plastic, trim colors — the BASE HUE must match. Note: enhanced vibrancy/richness of the SAME color is acceptable and expected. AUTOMATIC FAILURE only if hue shifted.",
+    "• interior_content_lost: Interior content replaced with studio/empty space — seats, dashboard, console, or controls disappeared. AUTOMATIC FAILURE.",
+    "• interior_structure_changed: Seat shapes, dashboard layout, or components differ from Image 1.",
+    "• material_texture_changed: Real texture grain replaced with smooth/plastic look, or stitching pattern removed.",
+  ];
+
+  const detailChecks = [
+    "• component_detail_lost: Fine details from Image 1 are missing (bolt patterns, tyre sidewall text, lens patterns, weave patterns, stitching).",
+    "• material_texture_changed: Material texture, grain direction, or surface finish altered.",
+  ];
+
+  const categoryChecks = isInterior ? interiorChecks : exteriorEnvChecks;
+
+  const cleanupCheck = [
+    "• cleanup_artifact_remaining: The result still contains a visible photographer artifact that should have been removed — e.g. a hand, arm, phone, human silhouette, photographer reflection in paint/glass, photographer reflection in instrument-cluster glass or infotainment screens, or lens obstruction. Flag this if ANY human presence artifact is still visible in Image 3.",
+  ];
+
+  const qaPrompt = [
+    "Compare Image 3 (result) against Image 1 (original) and Image 2 (target studio). Report any defects.",
+    `Category: ${category}.`,
+    "",
+    "STRUCTURAL IDENTITY CHECKS (applies to ALL categories — the vehicle/component must be identical to Image 1):",
+    ...structuralChecks,
+    "",
+    "CLEANUP CHECKS (flag if original artifacts were not fully removed):",
+    ...cleanupCheck,
+    "",
+    `CATEGORY-SPECIFIC CHECKS for ${category}:`,
+    ...categoryChecks,
+    ...(isDetail ? detailChecks : []),
+    "",
+    "Return pass=true ONLY if zero issues are found.",
+    "Structural identity changes (geometry_changed, angle_or_direction_changed, wheel_design_changed, badge_text_changed, caliper_color_changed, interior_color_changed, interior_content_lost) are ALWAYS high severity with retry_recommended=true.",
+    "cleanup_artifact_remaining is always high severity with retry_recommended=true.",
+    isInterior
+      ? [
+        "INTERIOR WINDOW CHECK (critical): Look at EVERY window/glass surface in Image 3. Each must clearly show Image 2's studio environment — actual studio walls, ceiling, space. If ANY window shows outdoor content (sky, trees, sun) or just a flat uniform fill instead of visible studio geometry, flag it as window_outdoor_content_remaining or window_studio_not_visible with HIGH severity and retry_recommended=true.",
+        "INTERIOR LIGHTING CHECK: Interior surfaces must feel like they are lit by Image 2's studio ambient. If Image 2 is dark/moody, interior should be atmospheric. If bright, interior should be well-lit. Flag interior_lighting_mismatch if inconsistent.",
+        "INTERIOR REFLECTION CHECK: Inspect glossy instrument-cluster covers, infotainment screens, glossy piano-black trim, glossy wood trim, chrome bezels, mirror glass, and any other reflective interior surface. If any person, hand, phone, camera, or dark human silhouette is reflected there, flag cleanup_artifact_remaining with HIGH severity and retry_recommended=true.",
+        "INTERIOR IDENTITY: Result must be the SAME interior with studio-matching lighting and enhanced details — not a different interior or empty studio. Enhanced vibrancy is EXPECTED. Only flag interior_color_changed if the actual HUE shifted (brown to orange, not brown looking richer).",
+      ].join("\n")
+      : "EXTERIOR QUALITY: No outdoor artifacts may survive in a professional studio photo.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const response = await withRetry("qaEvaluate", () =>
+    ai.models.generateContent({
+      model: MODEL_VISION,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: qaPrompt },
+            { text: "Image 1 - original upload" },
+            getImagePart(originalBase64),
+            { text: "Image 2 - selected studio reference" },
+            getImagePart(studioImageBase64),
+            { text: "Image 3 - generated result" },
+            getImagePart(generatedBase64),
+          ],
+        },
+      ],
+      config: {
+        temperature: 0,
+        responseMimeType: "application/json",
+        responseJsonSchema: QA_SCHEMA,
+      },
+    }),
+  );
+
+  const data = JSON.parse(response.text || "{}");
+  return {
+    pass: Boolean(data.pass),
+    issues: Array.isArray(data.issues) ? data.issues : [],
+    severity: data.severity || "medium",
+    retry_recommended: Boolean(data.retry_recommended),
+  };
+}
+
+async function removeBackground(
+  imageBase64: string,
+  apiKey?: string,
+): Promise<string> {
+  if (!apiKey) return imageBase64;
+
+  try {
+    const fd = new FormData();
+    fd.append("image_file_b64", stripDataPrefix(imageBase64));
+    fd.append("size", "auto");
+    fd.append("format", "png");
+
+    const response = await fetch(REMBG_API, {
+      method: "POST",
+      headers: { "X-Api-Key": apiKey },
+      body: fd,
+    });
+
+    if (!response.ok) {
+      return imageBase64;
+    }
+
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return buildDataUri(bytes, "image/png");
+  } catch (error) {
+    console.warn("[removeBackground] Falling back to original image:", error);
+    return imageBase64;
+  }
+}
+
+async function geminiIsolate(
+  ai: GoogleGenAI,
+  imageBase64: string,
+): Promise<string> {
+  await interCallDelay();
+  // Single-pass isolation: extract vehicle directly onto a pure white background.
+  // This replaces the old 2-pass green-screen approach and saves one model call,
+  // keeping us well within Supabase edge runtime CPU/wall-clock limits while
+  // producing a clean white-background cutout for compositing.
+  const isolatePrompt = [
+    "Extract ONLY the vehicle from this image and place it on a pure white (#FFFFFF) background.",
+    "Remove EVERYTHING that is not part of the vehicle: road surface, pavement, cobblestones, buildings, sky, trees, other cars, people, shadows on the ground, and any background objects.",
+    "The vehicle body, wheels, glass, mirrors, badges, and all trim must remain exactly as-is — same angle, same crop, same zoom level, same framing.",
+    "The white background must be completely flat and uniform with NO gradients and NO ground shadows.",
+    "The car should appear to float slightly above the white background with only its tyres touching the bottom edge of the white floor.",
+    "Do not change the input aspect ratio.",
+  ].join(" ");
+
+  console.log("[gemini-isolate] Single-pass white-background extraction...");
+  const response: any = await withRetry("geminiIsolate-white", () =>
+    ai.models.generateContent({
+      model: MODEL_IMAGE,
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: isolatePrompt }, getImagePart(imageBase64)],
+        },
+      ],
+      config: {
+        temperature: 0.05,
+        topP: 0.15,
+        topK: 5,
+        candidateCount: 1,
+        responseModalities: ["Image"] as string[],
+        safetySettings: SAFETY_SETTINGS,
+      },
+    }),
+  );
+
+  const part = response.candidates?.[0]?.content?.parts?.find(
+    (p: any) => p.inlineData?.data,
+  );
+  if (!part?.inlineData?.data) {
+    throw new Error(
+      "Gemini failed to extract the vehicle onto a white background.",
+    );
+  }
+
+  validateImageOutput(part.inlineData.data, "geminiIsolate:white_bg");
+  console.log("[gemini-isolate] Single-pass isolation complete.");
+  return `data:${part.inlineData.mimeType || "image/png"};base64,${part.inlineData.data}`;
+}
+
+async function isolateCar(
+  ai: GoogleGenAI,
+  imageBase64: string,
+  removeBgKey?: string,
+): Promise<string> {
+  if (removeBgKey) {
+    console.log("[isolate] Using remove.bg API...");
+    const result = await removeBackground(imageBase64, removeBgKey);
+    if (result !== imageBase64) {
+      console.log("[isolate] remove.bg succeeded.");
+      return result;
+    }
+    console.warn(
+      "[isolate] remove.bg returned original — falling back to Gemini isolate.",
+    );
+  }
+  console.log("[isolate] Using Gemini green-screen isolation...");
+  return geminiIsolate(ai, imageBase64);
+}
+
+async function generateImage(
+  ai: GoogleGenAI,
+  promptText: string,
+  subjectImage: string,
+  studioImageBase64: string,
+  studioFile: { uri: string; mimeType: string } | null,
+  qualityReference: QualityReference | null,
+  branding?: { isEnabled?: boolean; logoUrl?: string | null },
+  category?: string,
+): Promise<string> {
+  const labelMap: Record<string, { img1: string; img2: string }> = {
+    EXTERIOR: {
+      img1: "Image 1 — the car with its background already removed and placed on a white background. This is the clean vehicle subject to composite into the studio. Preserve the car's exact shape, paint, wheels, badges, trim, camera angle, zoom level, crop, and framing. Do NOT alter the vehicle itself in any way.",
+      img2: "Image 2 — the target studio environment. Use this studio's floor, walls, ceiling, and lighting to build the entire scene around Image 1's car. The floor color, wall color, and light direction must exactly match this image.",
+    },
+    EXTERIOR_DETAIL: {
+      img1: "Image 1 — close-up of an automotive component. Keep every single detail EXACTLY as-is: spoke geometry, caliper color, badge text, bolt pattern, tyre sidewall text, paint finish, carbon fiber weave, lens pattern, chrome highlights. Change NOTHING on the component itself.",
+      img2: "Image 2 — studio reference. Use ONLY for the background behind the component and for ambient lighting/reflection tone. Do NOT use it to alter the component.",
+    },
+    INTERIOR: {
+      img1: "Image 1 — the car interior photo to edit. This is the MASTER reference. Every pixel of the car must stay identical: same seats, dashboard, steering wheel, materials, colors, textures, shapes, positions, camera angle, zoom, crop, and framing. You are NOT recreating this image — you are making minimal, surgical edits to it.",
+      img2: "Image 2 — the studio reference. Use ONLY to determine: (a) what studio environment to show through windows, and (b) the color temperature/tone of the ambient light. Do NOT use this to change any car geometry, materials, or camera angle.",
+    },
+    INTERIOR_DETAIL: {
+      img1: "Image 1 — the interior detail photo to edit. This is the MASTER reference. Every component stays identical: same geometry, materials, colors, textures, positions, zoom, and framing. You are making minimal edits only.",
+      img2: "Image 2 — the studio reference. Use ONLY to determine the ambient light color temperature and tone. Do NOT use this to change any geometry or materials.",
+    },
+  };
+  const labels = labelMap[category || "EXTERIOR"] || labelMap.EXTERIOR;
+  const image1Label = labels.img1;
+  const image2Label = labels.img2;
+
+  const isInteriorCategory =
+    category === "INTERIOR" || category === "INTERIOR_DETAIL";
+
+  let parts: any[];
+
+  if (isInteriorCategory) {
+    // For interiors: car image FIRST as the anchor (master reference),
+    // studio image SECOND as a lighting/environment reference only.
+    parts = [
+      { text: promptText },
+      { text: image1Label },
+      getImagePart(subjectImage),
+      { text: image2Label },
+      createStudioPart(studioImageBase64, studioFile),
+    ];
+  } else {
+    parts = [
+      { text: promptText },
+      { text: image1Label },
+      getImagePart(subjectImage),
+      { text: image2Label },
+      createStudioPart(studioImageBase64, studioFile),
+    ];
+
+    if (qualityReference?.imageBase64) {
+      parts.push({ text: `Image 3 - ${qualityReference.label}` });
+      parts.push(getImagePart(qualityReference.imageBase64));
+    }
+
+    if (branding?.isEnabled && branding.logoUrl) {
+      const brandingImageNumber = qualityReference?.imageBase64 ? 4 : 3;
+      parts.push({
+        text: `Image ${brandingImageNumber} - branding logo, place subtly in the top-left if present`,
+      });
+      parts.push(getImagePart(branding.logoUrl));
+    }
+  }
+
+  const imageModel = isInteriorCategory ? MODEL_IMAGE_INTERIOR : MODEL_IMAGE;
+  const genConfig = isInteriorCategory
+    ? {
+      temperature: 0.15,
+      topP: 0.3,
+      topK: 10,
+      candidateCount: 1,
+      responseModalities: ["Image"] as string[],
+      safetySettings: SAFETY_SETTINGS,
+    }
+    : {
+      temperature: 0.2,
+      topP: 0.4,
+      topK: 10,
+      candidateCount: 1,
+      responseModalities: ["Image"] as string[],
+      safetySettings: SAFETY_SETTINGS,
+    };
+
+  console.log(
+    `[generateImage] Using model: ${imageModel} for category: ${category}`,
+  );
+  await interCallDelay();
+  const response: any = await withRetry("generateImage", () =>
+    ai.models.generateContent({
+      model: imageModel,
+      contents: [{ role: "user", parts }],
+      config: genConfig,
+    }),
+  );
+
+  const imagePart = response.candidates?.[0]?.content?.parts?.find(
+    (part: any) => part.inlineData?.data,
+  );
+  if (!imagePart?.inlineData?.data) {
+    throw new Error(
+      `AutoStudio composite generation failed. Finish reason: ${response.candidates?.[0]?.finishReason || "UNKNOWN"}`,
+    );
+  }
+
+  validateImageOutput(imagePart.inlineData.data, "generateImage");
+  return `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
+}
+
+async function interiorStudioRefinement(params: {
+  ai: GoogleGenAI;
+  generatedBase64: string;
+  studioImageBase64: string;
+  originalBase64: string;
+  studioHints?: StudioHints;
+  category?: string;
+  qaIssues?: string[];
+}): Promise<string> {
+  const isDark = params.studioHints?.studioTone === "dark";
+
+  const lightingFix = isDark
+    ? "The lighting must be dark and moody like this studio — remove all bright daylight from interior surfaces. Shadows should be deep and atmospheric."
+    : "The lighting must be bright and even like this studio — remove all harsh outdoor directional light from interior surfaces. Shadows should be soft and diffused.";
+  const qaFixes = buildQaFixSection(
+    params.category || "INTERIOR",
+    params.qaIssues || [],
+  );
+
+  const prompt = [
+    "You are retouching Image 1. The camera angle, zoom, crop, and framing of Image 1 must remain IDENTICAL in the output.",
+    "Image 2 is a studio reference — use it only to determine what to show through windows and the lighting tone.",
+    `Make ONLY these targeted fixes to Image 1: (a) replace any remaining outdoor content through windows with the studio from Image 2; (b) ${lightingFix}; (c) remove any photographer or camera reflections from glass and screens — preserve all gauge numbers, icons, and screen text exactly.`,
+    "DO NOT change: camera angle, zoom, crop, framing, seat shapes, dashboard layout, material colors, material textures, or any component geometry.",
+    qaFixes,
+    "Do not change the input aspect ratio.",
+  ].join(" ");
+
+  console.log(
+    `[interior-refine] Studio refinement pass starting (model: ${MODEL_IMAGE_INTERIOR})...`,
+  );
+  await interCallDelay();
+  const response: any = await withRetry("interiorStudioRefinement", () =>
+    params.ai.models.generateContent({
+      model: MODEL_IMAGE_INTERIOR,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: prompt },
+            {
+              text: "Image 1 — the car interior to retouch. This is the MASTER. All geometry, colors, materials, framing, zoom, and crop must be preserved exactly.",
+            },
+            getImagePart(params.generatedBase64),
+            {
+              text: "Image 2 — the studio reference. Use only for window content and lighting tone.",
+            },
+            getImagePart(params.studioImageBase64),
+          ],
+        },
+      ],
+      config: {
+        temperature: 0.1,
+        topP: 0.2,
+        topK: 10,
+        candidateCount: 1,
+        responseModalities: ["Image"] as string[],
+        safetySettings: SAFETY_SETTINGS,
+      },
+    }),
+  );
+
+  const imagePart = response.candidates?.[0]?.content?.parts?.find(
+    (part: any) => part.inlineData?.data,
+  );
+  if (imagePart?.inlineData?.data) {
+    console.log("[interior-refine] Studio refinement pass succeeded.");
+    validateImageOutput(imagePart.inlineData.data, "interiorStudioRefinement");
+    return `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
+  }
+  console.warn(
+    "[interior-refine] No image produced — returning first generation.",
+  );
+  return params.generatedBase64;
+}
+
+async function refineExteriorGrounding(params: {
+  ai: GoogleGenAI;
+  generatedBase64: string;
+  studioImageBase64: string;
+  originalBase64: string;
+  studioHints?: StudioHints;
+  qaIssues?: string[];
+}): Promise<string> {
+  const fixes = params.qaIssues?.length
+    ? `\nQA issues to correct: ${params.qaIssues.join(", ")}.`
+    : "";
+  const studio = buildStudioContext(params.studioHints);
+  const isDark = params.studioHints?.studioTone === "dark";
+  // Post-composite grounding: Image 1 is already a studio composite — fix edge artifacts, shadows, and surface quality
+  const promptText = [
+    "Image 1 is a studio composite of a car. Your job is to refine the quality of this composite. Image 2 is the target studio reference. Image 3 is the original car photo for vehicle detail verification.",
+    "⚠ Same crop, zoom, framing as Image 1 — do not recompose.",
+    "",
+    `STUDIO CONTEXT: ${studio}`,
+    "",
+    "FIX EDGE ARTIFACTS:",
+    "• If the car outline has a halo, fringe, color bleed, or ghosting at the edges where the car meets the background, clean these up. The transition between car and background should be sharp and natural.",
+    "• Any remaining green tinge or translucency from background extraction should be fully removed.",
+    "",
+    "FIX FLOOR/ENVIRONMENT:",
+    "• FLOOR: Ensure the floor color exactly matches Image 2. Place a natural contact shadow where tyres meet the floor.",
+    "• WALLS: Ensure background walls match Image 2.",
+    "• Glass: windows should show Image 2's studio environment.",
+    isDark
+      ? "• DARK STUDIO: check for bright artifacts on paint, glass, or floor."
+      : "",
+    "",
+    "FIX REFLECTIONS:",
+    "• Paint: smooth overhead studio gradient reflections — no sharp shapes, no showroom lights visible. Soft light-to-dark gradient on dark paint, even white highlight on light paint.",
+    "• Chrome/trim: clean sharp studio highlight streaks. No environmental reflections.",
+    "",
+    "ENHANCE SURFACE QUALITY:",
+    "• PAINT: Clean all panels — remove dirt, dust, water spots, grime. Fix minor dents, scratches. Enhance gloss under studio lighting. CRITICAL: do NOT change paint color, hue, shade, or saturation.",
+    "• TYRES (if visible): Clean sidewalls, jet black, freshly-dressed appearance. NEVER change tyre text, tread, spoke geometry, or caliper color.",
+    "",
+    "ABSOLUTE RULES — zero tolerance:",
+    "• Camera angle, zoom, crop, framing: IDENTICAL to Image 1. No recomposing.",
+    "• Vehicle body shape, paint color, wheel design, badges, plates, trim: unchanged.",
+    "Do not change the input aspect ratio." + fixes,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  await interCallDelay();
+  const response: any = await withRetry("refineExteriorGrounding", () =>
+    params.ai.models.generateContent({
+      model: MODEL_IMAGE,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: promptText },
+            {
+              text: "Image 1 — the studio composite to refine (fix edges, shadows, and surface quality)",
+            },
+            getImagePart(params.generatedBase64),
+            {
+              text: "Image 2 — target studio reference (floor, walls, lighting)",
+            },
+            getImagePart(params.studioImageBase64),
+            {
+              text: "Image 3 — original car photo (use only to verify vehicle details are preserved)",
+            },
+            getImagePart(params.originalBase64),
+          ],
+        },
+      ],
+      config: {
+        temperature: 0.2,
+        topP: 0.4,
+        topK: 10,
+        candidateCount: 1,
+        responseModalities: ["Image"],
+        safetySettings: SAFETY_SETTINGS,
+      },
+    }),
+  );
+
+  const imagePart = response.candidates?.[0]?.content?.parts?.find(
+    (part: any) => part.inlineData?.data,
+  );
+  if (!imagePart?.inlineData?.data) {
+    throw new Error(
+      `Exterior grounding refinement failed. Finish reason: ${response.candidates?.[0]?.finishReason || "UNKNOWN"}`,
+    );
+  }
+
+  validateImageOutput(imagePart.inlineData.data, "refineExteriorGrounding");
+  return `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
+}
+
+async function refineExteriorDetailGrounding(params: {
+  ai: GoogleGenAI;
+  generatedBase64: string;
+  studioImageBase64: string;
+  originalBase64: string;
+  studioHints?: StudioHints;
+  qaIssues?: string[];
+}): Promise<string> {
+  const isDark = params.studioHints?.studioTone === "dark";
+  const fixes = buildQaFixSection("EXTERIOR_DETAIL", params.qaIssues || []);
+
+  const promptText = [
+    "Image 1 is a studio composite of an automotive component. Refine its quality. Image 2 is the target studio reference. Image 3 is the original component photo for detail verification.",
+    "The output must have the EXACT same crop, zoom, framing, and camera position as Image 1 — do NOT recompose or change the shot.",
+    "",
+    "FIX 1 — EDGE AND ENVIRONMENT:",
+    "• EDGE ARTIFACTS: Clean any halo, fringe, color bleed, or ghosting at the component edge where it meets the background. Transition should be sharp and natural.",
+    "• BACKGROUND: Any remaining non-studio environment must be replaced with Image 2's studio backdrop.",
+    "• PANEL REFLECTIONS: Any reflections of showroom lights or windows on painted panels must be replaced with clean studio-consistent gradients from Image 2.",
+    "• CHROME REFLECTIONS: Replace location reflections with smooth studio highlight streaks from Image 2's key light.",
+    isDark
+      ? "• DARK STUDIO: Bright artifacts are especially visible — check all glossy surfaces."
+      : "",
+    "",
+    "FIX 2 — PAINT & BODY ENHANCEMENT:",
+    "• Clean all painted panels: remove dirt, dust, water spots, road grime, tar. Fix minor dents and panel dings — restore smooth factory geometry. Remove light scratches and swirl marks. Fix washed-out/overexposed panels — recover correct paint color and depth. Enhance gloss under studio lighting.",
+    "• CRITICAL: Do NOT change paint color, hue, shade, or saturation at all. Only clean and enhance.",
+    "",
+    "FIX 3 — TYRE CLEANING & POLISHING (if tyres are visible):",
+    "• Clean tyre sidewalls: remove mud, brown oxidation, and brake dust. Make tyres look clean and jet black.",
+    "• If tyres appear old, faded, or weathered — darken to freshly-dressed appearance.",
+    "• Clean brake dust off spokes and caliper surfaces.",
+    "• NEVER change: tyre brand text, size markings, tread pattern, spoke geometry, spoke finish, caliper color.",
+    "",
+    "PRESERVE EXACTLY (zero tolerance):",
+    "• Every physical detail — shape, geometry, paint color, finish type, grille mesh, badge logos, headlight lenses, spoke design, caliper color, tyre text, tread pattern",
+    "• Camera angle, zoom level, crop, and framing — must match Image 1 and Image 3 exactly",
+    fixes,
+    "Do not change the input aspect ratio.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  await interCallDelay();
+  const response: any = await withRetry("refineExteriorDetailGrounding", () =>
+    params.ai.models.generateContent({
+      model: MODEL_IMAGE,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: promptText },
+            {
+              text: "Image 1 — current output to fix (has remaining showroom environment)",
+            },
+            getImagePart(params.generatedBase64),
+            {
+              text: "Image 2 — target studio (use only for background and reflection reference)",
+            },
+            getImagePart(params.studioImageBase64),
+            {
+              text: "Image 3 — original component photo (use only to verify component details are preserved)",
+            },
+            getImagePart(params.originalBase64),
+          ],
+        },
+      ],
+      config: {
+        temperature: 0.2,
+        topP: 0.4,
+        topK: 10,
+        candidateCount: 1,
+        responseModalities: ["Image"] as string[],
+        safetySettings: SAFETY_SETTINGS,
+      },
+    }),
+  );
+
+  const imagePart = response.candidates?.[0]?.content?.parts?.find(
+    (part: any) => part.inlineData?.data,
+  );
+  if (!imagePart?.inlineData?.data) {
+    throw new Error(
+      `Exterior detail grounding refinement failed. Finish reason: ${response.candidates?.[0]?.finishReason || "UNKNOWN"}`,
+    );
+  }
+
+  validateImageOutput(
+    imagePart.inlineData.data,
+    "refineExteriorDetailGrounding",
+  );
+  return `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
+}
+
+async function correctFloor(params: {
+  ai: GoogleGenAI;
+  generatedBase64: string;
+  studioImageBase64: string;
+  studioHints?: StudioHints;
+}): Promise<string> {
+  const isBright = params.studioHints?.studioTone === "bright";
+  const targetFloorColor = isBright
+    ? "WHITE or very light gray"
+    : params.studioHints?.studioTone === "dark"
+      ? "dark gray or black"
+      : "medium gray";
+
+  const prompt = [
+    "Image 1 is a studio composite. Look at it. Check if the floor surface (the horizontal area under and around the car) matches the studio floor in Image 2.",
+    `The floor MUST be ${targetFloorColor}. If it is already correct, return Image 1 unchanged.`,
+    `If the floor is the WRONG color, replace ONLY the floor surface with ${targetFloorColor}. Keep a natural contact shadow under the tyres.`,
+    "CRITICAL: Do NOT change ANYTHING else. Same crop, zoom, framing, camera angle. Do not touch the car, paint, wheels, reflections, or background walls. ONLY the floor color.",
+  ].join(" ");
+
+  console.log(
+    `[floor-correct] Running floor correction pass (target: ${targetFloorColor})...`,
+  );
+  await interCallDelay();
+  const response: any = await withRetry("correctFloor", () =>
+    params.ai.models.generateContent({
+      model: MODEL_IMAGE,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: prompt },
+            { text: "Image 1 — the photo to check and fix (floor only)." },
+            getImagePart(params.generatedBase64),
+            {
+              text: "Image 2 — studio reference showing the correct floor color.",
+            },
+            getImagePart(params.studioImageBase64),
+          ],
+        },
+      ],
+      config: {
+        temperature: 0.15,
+        topP: 0.3,
+        topK: 10,
+        candidateCount: 1,
+        responseModalities: ["Image"] as string[],
+        safetySettings: SAFETY_SETTINGS,
+      },
+    }),
+  );
+
+  const imagePart = response.candidates?.[0]?.content?.parts?.find(
+    (part: any) => part.inlineData?.data,
+  );
+  if (imagePart?.inlineData?.data) {
+    console.log("[floor-correct] Floor correction pass succeeded.");
+    validateImageOutput(imagePart.inlineData.data, "correctFloor");
+    return `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
+  }
+  console.warn(
+    "[floor-correct] No image produced — returning input unchanged.",
+  );
+  return params.generatedBase64;
+}
+
+function buildStudioContext(hints?: StudioHints): string {
+  if (!hints)
+    return "Study Image 2 carefully — its floor, walls, light direction, and mood define every decision you make.";
+
+  const lighting: Record<string, string> = {
+    warm: "warm-toned key light with golden fill, soft amber rolloff on surfaces",
+    cool: "cool-toned key light with crisp white fill, clean neutral-to-blue rolloff",
+    neutral:
+      "balanced neutral key light with soft white fill, even rolloff across surfaces",
+  };
+
+  const platform: Record<string, string> = {
+    round_platform:
+      "circular display turntable — the car sits on a raised round platform with a subtle edge",
+    flat_floor:
+      "flat continuous floor extending naturally under and around the vehicle",
+    interior_ambient:
+      "ambient studio environment visible through windows and glass",
+  };
+
+  const studioTone: Record<string, string> = {
+    bright:
+      "high-key bright WHITE studio — walls are WHITE, floor is WHITE or very light gray, ceiling is WHITE. Background must be bright white, not gray or dark",
+    mid: "balanced mid-tone studio — walls are light gray, floor is medium gray. Background must match these exact tones",
+    dark: "low-key dark studio — walls are dark gray/black, floor is dark. CRITICAL: every outdoor artifact is highly visible against the dark environment and must be completely eliminated",
+  };
+
+  const floorFinish: Record<string, string> = {
+    matte: "matte floor with minimal reflection and soft edge transitions",
+    semi_gloss:
+      "semi-gloss floor with restrained reflection and readable contact shadow separation",
+    glossy:
+      "glossy floor with visible but controlled reflections directly tied to studio lighting",
+  };
+
+  return [
+    `Studio: "${hints.name}".`,
+    `Lighting: ${lighting[hints.lightingProfile] || lighting.neutral}.`,
+    `Floor: ${platform[hints.platformType] || platform.flat_floor}.`,
+    `Tone: ${studioTone[hints.studioTone] || studioTone.mid}.`,
+    `Floor finish: ${floorFinish[hints.floorFinish] || floorFinish.matte}.`,
+    hints.exposureNote ? `Photographer note: ${hints.exposureNote}` : "",
+    "Study Image 2 carefully — its floor color, wall tone, light direction, and mood define every decision you make.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function describeAngle(angleFamily: string): string {
+  const descriptions: Record<string, string> = {
+    front:
+      "direct front view — camera is positioned directly in front of the vehicle, facing the front grille/bumper head-on",
+    rear: "direct rear view — camera is positioned directly behind the vehicle, facing the rear bumper/tailgate head-on",
+    side: "side profile view — camera is positioned at the side of the vehicle, showing a full lateral profile",
+    three_quarter:
+      "three-quarter view — camera is positioned at an angle showing both the front/rear and one side of the vehicle",
+    interior: "interior view — camera is inside the vehicle cabin",
+    detail: "detail close-up — camera is focused on a specific component",
+  };
+  return descriptions[angleFamily] || `camera angle: ${angleFamily}`;
+}
+
+function buildQaFixSection(category: string, qaIssues: string[] = []): string {
+  if (!qaIssues.length) return "";
+
+  const isInterior = category === "INTERIOR" || category === "INTERIOR_DETAIL";
+  const lines = ["QA FIXES (must be corrected in this render):"];
+
+  for (const issue of qaIssues) {
+    switch (issue) {
+      case "cleanup_artifact_remaining":
+        lines.push(
+          isInterior
+            ? "• Remove every remaining human/camera artifact. No photographer, phone, hand, arm, silhouette, or human reflection may remain anywhere. Inspect instrument-cluster glass, infotainment screens, glossy piano-black trim, glossy wood, chrome bezels, mirror glass, and metallic trim. Replace those reflections with clean studio-consistent highlights while preserving the underlying gauges, icons, text, and trim details exactly."
+            : "• Remove every remaining human/camera artifact. No photographer, phone, hand, arm, silhouette, or human reflection may remain on any paint, chrome, glass, mirror, or body panel.",
+        );
+        break;
+      case "window_outdoor_content_remaining":
+        lines.push(
+          "• Every visible window and glass surface must show the selected studio environment only. Remove all sky, trees, road, cars, parking lot, and daylight artifacts.",
+        );
+        break;
+      case "window_studio_not_visible":
+        lines.push(
+          "• Windows must show real studio geometry from the selected studio image, not a flat white/grey fill.",
+        );
+        break;
+      case "interior_lighting_mismatch":
+        lines.push(
+          "• Rebuild interior lighting and shadows so they clearly match the selected studio mood, direction, softness, and color temperature.",
+        );
+        break;
+      case "outdoor_reflection_left":
+      case "body_panel_outdoor_reflection":
+        lines.push(
+          "• Remove all remaining outdoor reflections and replace them with reflections derived from the selected studio lighting and surfaces only.",
+        );
+        break;
+      case "windshield_outdoor_content":
+        lines.push(
+          "• The windshield and all other glass must show only the selected studio, never outdoor scenery or daylight.",
+        );
+        break;
+      case "shadow_mismatch":
+        lines.push(
+          "• Rebuild shadows so they match the selected studio lighting direction, softness, and floor behavior. Ensure the floor color matches the studio.",
+        );
+        break;
+      case "studio_surrounding_mismatch":
+        lines.push(
+          "• The floor and/or walls do not match the studio. Replace the ENTIRE floor surface and all walls with the exact colors from the studio image. For a bright/white studio, the floor must be WHITE, not dark.",
+        );
+        break;
+      default:
+        lines.push(`• Resolve the remaining QA issue: ${issue}.`);
+        break;
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function buildPrompt(
+  category: string,
+  originalAngle: string,
+  qaIssues: string[] = [],
+  studioHints?: StudioHints,
+  qualityReference?: QualityReference | null,
+  angleFamily?: string,
+): string {
+  const fixes = buildQaFixSection(category, qaIssues);
+  const studio = buildStudioContext(studioHints);
+  const qualitySection = qualityReference
+    ? "QUALITY TARGET: Use Image 3 only as a finish-quality benchmark for realism, dynamic range, shadow softness, tyre-to-floor contact, reflection cleanliness, and believable studio grounding. Do not copy Image 3's vehicle shape, crop, camera angle, or studio design."
+    : "";
+  const isDark = studioHints?.studioTone === "dark";
+  const angleLock =
+    angleFamily && angleFamily !== "unknown"
+      ? `\nCAMERA ANGLE LOCKED: The original photo is a ${describeAngle(angleFamily)}. You MUST produce the output from this EXACT same camera angle and perspective. Do not rotate, orbit, or shift the viewpoint. Do not change the input aspect ratio. The vehicle must face the same direction and show the same surfaces as in Image 1.`
+      : "\nCAMERA ANGLE LOCKED: Reproduce the EXACT same camera angle, perspective, and viewpoint as Image 1. Do not rotate, orbit, or shift the viewpoint. Do not change the input aspect ratio.";
+
+  if (category === "EXTERIOR") {
+    const angleDesc =
+      angleFamily && angleFamily !== "unknown"
+        ? `The car is shown from a ${describeAngle(angleFamily)} perspective.`
+        : "The car angle and framing in Image 1 define the final composition.";
+
+    const floorDesc = isDark
+      ? "dark studio floor matching Image 2 — deep shadows, minimal reflection"
+      : studioHints?.floorFinish === "glossy"
+        ? "glossy studio floor from Image 2 with a clean reflection of the car directly beneath it"
+        : studioHints?.floorFinish === "matte"
+          ? "matte studio floor from Image 2 with soft contact shadow, no reflection"
+          : "semi-gloss studio floor from Image 2 with a faint, soft reflection of the car";
+
+    const wallDesc = isDark
+      ? "dark studio walls/background from Image 2"
+      : "bright white or light studio walls/background from Image 2";
+
+    return [
+      `Create a professional automotive studio photograph by compositing the car from Image 1 into the studio environment from Image 2.`,
+      "",
+      `Image 1 is the car on a white background — it is the SUBJECT. ${angleDesc} Preserve the car's exact shape, paint color, wheel design, badges, trim, camera angle, zoom level, and framing. Do NOT alter the vehicle in any way.`,
+      "",
+      `Image 2 is the TARGET STUDIO. Build the entire scene around the car using Image 2's environment.`,
+      "",
+      `STUDIO CONTEXT: ${studio}`,
+      qualitySection,
+      "",
+      "ENVIRONMENT — build entirely from Image 2:",
+      `• BACKGROUND/WALLS: ${wallDesc}. The background must visually match Image 2.`,
+      `• FLOOR: Place the car on a ${floorDesc}. The floor must fill the entire lower portion of the image and match Image 2's floor tone exactly.`,
+      "• CONTACT SHADOW: Add a natural shadow under the tyres where they meet the floor — darkest at the contact point, softening outward.",
+      "• WINDOWS/GLASS: Show the studio environment from Image 2 through the windshield and side windows (walls, ceiling, ambient light).",
+      "",
+      "PAINT REFLECTIONS — generate fresh studio-quality reflections:",
+      "• PAINTED PANELS (bonnet/hood, doors, fenders, roof, rear bumper): Generate smooth, continuous overhead studio light gradients on the paint. On dark paint, a gentle bright-to-dark gradient from top of panel to bottom. On light paint, an even soft highlight. No showroom ceiling lights, no strip lights, no windows, no environmental shapes in the reflection.",
+      "• CHROME AND TRIM: Clean, sharp highlight streaks from Image 2's overhead key light.",
+      isDark
+        ? "• DARK STUDIO: ensure no bright artifacts appear on dark paint — only studio-controlled highlights."
+        : "",
+      "",
+      "VEHICLE SURFACE ENHANCEMENT:",
+      "• Clean the paint: remove dirt, dust, water spots, and grime. Restore gloss and depth.",
+      "• Fix minor dents, scratches, swirl marks. Recover overexposed panel areas.",
+      "• CRITICAL: Do NOT change paint color, hue, shade, or saturation at all.",
+      "• TYRES: Clean sidewalls — jet black, no brown oxidation. Freshen rubber to tyre-shine appearance. Never change tyre text, tread, spoke geometry, or caliper color.",
+      "",
+      "FRAMING — absolute zero tolerance:",
+      "• The output crop, zoom level, and camera angle must match Image 1 exactly. Do not zoom out, zoom in, pan, or reveal more car than Image 1 shows.",
+      "• Vehicle body shape, proportions, badges, plates, and all trim must be identical to Image 1.",
+      "",
+      "Do not change the input aspect ratio.",
+      fixes,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (category === "INTERIOR") {
+    const lightingTone = isDark
+      ? "shift the ambient light to dark moody tones — deep controlled shadows, no daylight"
+      : studioHints?.lightingProfile === "warm"
+        ? "shift the ambient light to warm golden tones from overhead softboxes"
+        : studioHints?.lightingProfile === "cool"
+          ? "shift the ambient light to cool crisp white tones from overhead LEDs"
+          : "normalize the ambient light to clean even neutral studio tones";
+
+    const interiorAngleLock =
+      angleFamily && angleFamily !== "unknown"
+        ? `This is a ${describeAngle(angleFamily)} shot. The output must match this exact viewpoint.`
+        : "The output must match the exact viewpoint of Image 1.";
+
+    return [
+      `You are retouching Image 1. ${interiorAngleLock}`,
+      `Image 2 is a studio reference — use it ONLY to determine what to show through windows and what lighting tone to apply.`,
+      ``,
+      `Make ONLY these four targeted changes to Image 1. Change nothing else:`,
+      ``,
+      `1. WINDOWS ONLY: Replace the content visible through windshield, side windows, rear window, and sunroof with the studio environment from Image 2. The glass areas are the ONLY regions that may be substantially altered.`,
+      ``,
+      `2. LIGHTING TONE ONLY: ${lightingTone}. Adjust color temperature and remove outdoor sun patches/streaks. Do not repaint surfaces — only adjust tone as if the light source changed.`,
+      ``,
+      `3. REFLECTION CLEANUP ONLY: On instrument-cluster glass, infotainment screens, chrome bezels, and mirror glass — remove any photographer, hand, or phone reflections. Replace with clean neutral highlights. Preserve all gauge numbers, icons, and screen UI exactly.`,
+      ``,
+      `4. EXPOSURE RECOVERY ONLY: If areas are severely overexposed or underexposed, recover detail. Do not alter correctly-exposed areas.`,
+      ``,
+      `DO NOT CHANGE UNDER ANY CIRCUMSTANCES:`,
+      `• Camera angle, perspective, zoom level, or framing — output crop must be pixel-identical to Image 1`,
+      `• Seat shapes, positions, upholstery colors, or materials`,
+      `• Dashboard layout, steering wheel shape, center console geometry`,
+      `• Any surface color, material texture, or component shape`,
+      `• Any physical object position, size, or proportion`,
+      ``,
+      `Do not change the input aspect ratio.`,
+      fixes,
+    ].join("\n");
+  }
+
+  if (category === "EXTERIOR_DETAIL") {
+    return [
+      "Using the provided Image 1, do two things: (1) replace all environment/background with Image 2's studio, and (2) enhance the vehicle surface quality.",
+      angleLock,
+      "",
+      `STUDIO CONTEXT: ${studio}`,
+      qualitySection,
+      "",
+      "PART 1 — ENVIRONMENT REPLACEMENT (everything that is not the car):",
+      "• BACKGROUND: Every pixel that is not part of the vehicle must become Image 2's studio. Replace showroom walls, outdoor pavement, concrete blocks, sky, buildings, parked cars, and any non-vehicle surface.",
+      "• FLOOR: Replace any showroom floor, pavement, paving stones, or road surface under/around the car with Image 2's studio floor. Add a contact shadow consistent with Image 2's lighting direction.",
+      "• PANEL REFLECTIONS: On painted body panels and bonnet/hood — remove showroom ceiling lights, walls, windows from reflections. Replace with a clean overhead gradient from Image 2's studio lighting.",
+      "• CHROME & TRIM REFLECTIONS: On chrome grille surrounds, door handles, trim strips — replace location-specific reflections with smooth studio highlight streaks from Image 2.",
+      "",
+      "PART 2 — PAINT & BODY ENHANCEMENT:",
+      "• Clean every painted panel: remove all dirt, dust, water spots, road grime, and surface contamination.",
+      "• Fix minor dents and panel dings — restore panel surfaces to smooth factory-correct geometry.",
+      "• Remove light scratches, swirl marks, and wash hazing.",
+      "• Fix overexposed or washed-out panel areas — fully recover the correct paint color and depth.",
+      "• Enhance paint gloss and depth under studio lighting — result should look freshly valeted.",
+      "• CRITICAL: Do NOT change the paint color, hue, shade, or saturation in any way. Only clean and enhance the surface.",
+      "",
+      "PART 3 — TYRE CLEANING & POLISHING (mandatory if tyres are visible):",
+      "• Clean tyre sidewalls: remove all mud, brown oxidation, brake dust, and road grime. Tyres must look clean and jet black.",
+      "• If tyres appear old, faded, or weathered — darken and enrich the rubber to look freshly dressed (tyre shine effect).",
+      "• Clean brake dust off wheel spokes, barrel, and caliper surfaces.",
+      "• NEVER change: tyre brand text, tyre size markings, tyre tread pattern, spoke geometry, spoke finish, caliper color.",
+      "",
+      "WHAT MUST NEVER CHANGE (zero tolerance):",
+      "• Vehicle body shape, proportions, and panel geometry",
+      "• Paint color, hue, shade, and finish type (matte, gloss, metallic, satin) — no color shift at all",
+      "• Grille mesh pattern, headlight lens shape, LED element geometry",
+      "• Badge text, logo shape, and logo color",
+      "• Wheel spoke design, spoke count, spoke finish, caliper color, tyre sidewall markings, tread pattern",
+      "• Camera angle, zoom, crop, and framing — output composition must be identical to Image 1",
+      "",
+      "FRAMING: Do not zoom, pan, or reframe. Do not change the input aspect ratio.",
+      fixes,
+    ].join("\n");
+  }
+
+  if (category === "INTERIOR_DETAIL") {
+    const detailLighting = isDark
+      ? "dark, moody studio lighting with refined highlights and atmospheric shadows"
+      : studioHints?.lightingProfile === "warm"
+        ? "warm golden studio lighting with soft warm shadows"
+        : studioHints?.lightingProfile === "cool"
+          ? "cool crisp white studio lighting with clean minimal shadows"
+          : "bright even neutral studio lighting with soft diffused shadows";
+
+    const detailAngleLock =
+      angleFamily && angleFamily !== "unknown"
+        ? `This is a ${describeAngle(angleFamily)} shot. Output must match this exact viewpoint.`
+        : "Output must match the exact viewpoint of Image 1.";
+
+    return [
+      `You are retouching Image 1. ${detailAngleLock}`,
+      `Image 2 is a studio reference — use it ONLY to determine the lighting tone to apply.`,
+      ``,
+      `Make ONLY these targeted changes to Image 1. Change nothing else:`,
+      ``,
+      `1. LIGHTING TONE ONLY: Apply ${detailLighting}. Remove outdoor sun patches, hard directional shadows, and overexposed hotspots. Adjust color temperature only — do not repaint or alter any surface.`,
+      ``,
+      `2. REFLECTION CLEANUP ONLY: Remove photographer, hand, or phone reflections from glass, screens, chrome, and glossy trim. Replace with clean neutral studio highlights. Preserve all gauge numbers, text, icons, and screen UI exactly.`,
+      ``,
+      `3. EXPOSURE RECOVERY ONLY: Recover detail in severely overexposed or underexposed zones only.`,
+      ``,
+      `4. WINDOWS (if visible): Replace any outdoor content through glass with a neutral studio blur or the studio from Image 2.`,
+      ``,
+      `DO NOT CHANGE UNDER ANY CIRCUMSTANCES:`,
+      `• Camera angle, zoom, crop, or framing — must be pixel-identical to Image 1`,
+      `• Any component geometry, position, shape, or size`,
+      `• Any material color or texture`,
+      `• Any text, numbers, icons, or markings`,
+      ``,
+      `Do not change the input aspect ratio.`,
+      fixes,
+    ].join("\n");
+  }
+
+  // ENGINE or unknown category — minimal retouching
+  return [
+    "Using the provided Image 1, change ONLY the background behind the engine bay. Keep the engine and all components exactly the same.",
+    angleLock,
+    "",
+    `STUDIO CONTEXT: ${studio}`,
+    qualitySection,
+    "",
+    "PRESERVE EXACTLY: every engine component, hose, wire, cover, cap, fluid reservoir, label, and surface finish.",
+    "CHANGE ONLY: visible background and ambient lighting to match Image 2.",
+    "FRAMING: Do not change the input aspect ratio, crop, or zoom.",
+    "OUTPUT: same dimensions and framing as Image 1.",
+    fixes,
+  ].join("\n");
+}
+
+async function runRouteGeneration(params: {
+  ai: GoogleGenAI;
+  category: string;
+  originalBase64: string;
+  originalAngle: string;
+  angleFamily?: string;
+  studioImageBase64: string;
+  studioFile: { uri: string; mimeType: string } | null;
+  qualityReference?: QualityReference | null;
+  branding?: { isEnabled?: boolean; logoUrl?: string | null };
+  removeBgKey?: string;
+  qaIssues?: string[];
+  studioHints?: StudioHints;
+}): Promise<string> {
+  const isExterior = params.category === "EXTERIOR";
+  const isInterior =
+    params.category === "INTERIOR" || params.category === "INTERIOR_DETAIL";
+  const qualityReference =
+    isExterior || isInterior ? params.qualityReference || null : null;
+
+  if (isExterior) {
+    // Isolate the car before compositing so the model gets a clean subject.
+    // Priority: remove.bg API (fastest, one HTTP call) → single-pass Gemini
+    // white-background extraction (one model call, replaces old 2-pass green-screen).
+    let subjectImage = params.originalBase64;
+    if (params.removeBgKey) {
+      console.log("[route] Trying remove.bg for car isolation...");
+      const removed = await removeBackground(
+        params.originalBase64,
+        params.removeBgKey,
+      );
+      if (removed !== params.originalBase64) {
+        subjectImage = removed;
+        console.log("[route] remove.bg isolation succeeded.");
+      } else {
+        console.warn(
+          "[route] remove.bg returned original — falling back to Gemini single-pass isolation.",
+        );
+        subjectImage = await geminiIsolate(params.ai, params.originalBase64);
+      }
+    } else {
+      console.log(
+        "[route] No REMOVE_BG_API_KEY — using Gemini single-pass isolation.",
+      );
+      subjectImage = await geminiIsolate(params.ai, params.originalBase64);
+    }
+    return generateImage(
+      params.ai,
+      buildPrompt(
+        params.category,
+        params.originalAngle,
+        params.qaIssues,
+        params.studioHints,
+        qualityReference,
+        params.angleFamily,
+      ),
+      subjectImage,
+      params.studioImageBase64,
+      params.studioFile,
+      qualityReference,
+      params.branding,
+      params.category,
+    );
+  }
+
+  return generateImage(
+    params.ai,
+    buildPrompt(
+      params.category,
+      params.originalAngle,
+      params.qaIssues,
+      params.studioHints,
+      qualityReference,
+      params.angleFamily,
+    ),
+    params.originalBase64,
+    params.studioImageBase64,
+    params.studioFile,
+    qualityReference,
+    params.branding,
+    params.category,
+  );
+}
+
+async function finalizePostGeneration(params: {
+  ai: GoogleGenAI;
+  category: string;
+  generatedBase64: string;
+  studioImageBase64: string;
+  originalBase64: string;
+  studioHints?: StudioHints;
+  qaIssues?: string[];
+}): Promise<string> {
+  if (params.category === "EXTERIOR") {
+    // Skip correctFloor (extra model call) — refineExteriorGrounding already
+    // handles floor color and quality. Removing this pass reduces CPU time
+    // significantly and keeps us within Supabase edge runtime limits.
+    return refineExteriorGrounding({
+      ai: params.ai,
+      generatedBase64: params.generatedBase64,
+      studioImageBase64: params.studioImageBase64,
+      originalBase64: params.originalBase64,
+      studioHints: params.studioHints,
+      qaIssues: params.qaIssues,
+    });
+  }
+
+  if (params.category === "EXTERIOR_DETAIL") {
+    console.log("[pipeline] Running exterior detail refinement pass");
+    return refineExteriorDetailGrounding({
+      ai: params.ai,
+      generatedBase64: params.generatedBase64,
+      studioImageBase64: params.studioImageBase64,
+      originalBase64: params.originalBase64,
+      studioHints: params.studioHints,
+      qaIssues: params.qaIssues,
+    });
+  }
+
+  if (params.category === "INTERIOR" || params.category === "INTERIOR_DETAIL") {
+    console.log(
+      `[pipeline] Running interior studio refinement for ${params.category}`,
+    );
+    return interiorStudioRefinement({
+      ai: params.ai,
+      generatedBase64: params.generatedBase64,
+      studioImageBase64: params.studioImageBase64,
+      originalBase64: params.originalBase64,
+      studioHints: params.studioHints,
+      category: params.category,
+      qaIssues: params.qaIssues,
+    });
+  }
+
+  return params.generatedBase64;
+}
+
+async function updateJob(
+  supabase: SupabaseClientAny,
+  jobId: string,
+  patch: Record<string, unknown>,
+) {
+  const { error } = await supabase
+    .from("generation_jobs")
+    .update(patch)
+    .eq("id", jobId);
+  if (error) throw error;
+}
+
+async function syncProjectSummary(
+  supabase: SupabaseClientAny,
+  projectId: string,
+) {
+  const { data: rows, error } = await supabase
+    .from("generation_jobs")
+    .select("*")
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: true });
+
+  if (error) throw error;
+
+  const jobs = (rows || []).map((row: any) => ({
+    id: row.id,
+    angle: row.original_angle || "OTHER",
+    originalImage: row.original_image_url,
+    processedImage:
+      row.final_4_3_url || row.generated_raw_url || row.original_image_url,
+    status: row.status,
+    detectedCategory: row.detected_category,
+    classifierConfidence: row.classifier_confidence,
+    classificationOverride: row.classification_override,
+    qaStatus: row.qa_status,
+    qaIssues: row.qa_issues || [],
+    qaSeverity: row.qa_severity,
+    needsReview: row.needs_review,
+    finalAspectRatio: row.final_aspect_ratio || "4:3",
+  }));
+
+  const status =
+    jobs.length > 0 &&
+      jobs.every((job: any) =>
+        ["completed", "failed", "needs_review"].includes(job.status),
+      )
+      ? "completed"
+      : "processing";
+  const thumbnail =
+    jobs.find((job: any) => job.processedImage)?.processedImage || null;
+
+  const { error: patchError } = await supabase
+    .from("projects")
+    .update({
+      jobs,
+      thumbnail_url: thumbnail,
+      status,
+      photo_count: jobs.length,
+    })
+    .eq("id", projectId);
+
+  if (patchError) throw patchError;
+}
+
+async function processGenerationJob(params: {
+  ai: GoogleGenAI;
+  supabase: SupabaseClientAny;
+  job: JobRow;
+  studioImageBase64: string;
+  removeBgKey?: string;
+  studioHints?: StudioHints;
+  qualityReference?: QualityReference | null;
+}) {
+  const {
+    ai,
+    supabase,
+    job,
+    studioImageBase64,
+    removeBgKey,
+    studioHints,
+    qualityReference,
+  } = params;
+  await updateJob(supabase, job.id, {
+    status: "classifying",
+    attempt_count: (job.attempt_count || 0) + 1,
+  });
+
+  const originalBase64 = await fetchImageAsDataUri(job.original_image_url);
+  const classification = await classifyImage(
+    ai,
+    originalBase64,
+    job.original_angle,
+  );
+  await interCallDelay();
+  const effectiveCategory = (job.classification_override ||
+    classification.category) as string;
+
+  await updateJob(supabase, job.id, {
+    detected_category: classification.category,
+    classifier_confidence: classification.confidence,
+    subject_type: classification.subject_type,
+    angle_family: classification.angle_family,
+    crop_lock: classification.crop_lock,
+    classification_notes: classification.notes,
+    route_version: ROUTE_VERSION,
+    prompt_version: PROMPT_VERSION,
+  });
+
+  // ── EXTERIOR jobs are handled by the process-exterior function ──
+  if (effectiveCategory === "EXTERIOR") {
+    console.log(
+      `[process-image] Job ${job.id} is EXTERIOR — skipping (returning to pending for process-exterior)`,
+    );
+    await updateJob(supabase, job.id, {
+      status: "pending",
+      error_message: null,
+    });
+    return;
+  }
+
+  if (
+    classification.category === "REJECT" ||
+    (!job.classification_override &&
+      classification.confidence < CLASSIFICATION_CONFIDENCE_THRESHOLD)
+  ) {
+    await updateJob(supabase, job.id, {
+      status: "needs_review",
+      needs_review: true,
+      qa_status: "failed",
+      qa_issues:
+        classification.category === "REJECT"
+          ? ["category_mismatch"]
+          : ["low_confidence"],
+      qa_severity: "medium",
+      error_message:
+        classification.category === "REJECT"
+          ? "Image could not be classified safely."
+          : "Classification confidence below threshold.",
+    });
+    return;
+  }
+
+  await updateJob(supabase, job.id, {
+    status: "processing",
+    needs_review: false,
+    error_message: null,
+  });
+
+  // Pre-generation cleanup: remove photographer artifacts, fix blur/exposure issues
+  // For interiors: only clean artifact issues — skip exposure issues to avoid anchoring original lighting
+  const isInteriorJob =
+    effectiveCategory === "INTERIOR" || effectiveCategory === "INTERIOR_DETAIL";
+  const ARTIFACT_ISSUES_JOB: QualityIssue[] = [
+    "photographer_visible",
+    "photographer_reflection",
+    "camera_obstruction",
+  ];
+  const actionableIssues = classification.quality_issues.filter(
+    (i) => i !== "none",
+  );
+
+  let cleanedBase64 = originalBase64;
+  if (actionableIssues.length > 0) {
+    if (isInteriorJob) {
+      const artifactOnly = actionableIssues.filter((i) =>
+        ARTIFACT_ISSUES_JOB.includes(i),
+      );
+      const skippedIssues = actionableIssues.filter(
+        (i) => !ARTIFACT_ISSUES_JOB.includes(i),
+      );
+      if (artifactOnly.length > 0) {
+        console.log(
+          `[pipeline] Interior cleanup: fixing artifacts (${artifactOnly.join(", ")}), skipping exposure issues (${skippedIssues.join(", ") || "none"})`,
+        );
+        cleanedBase64 = await cleanupImage(ai, originalBase64, artifactOnly);
+        await updateJob(supabase, job.id, { quality_issues: artifactOnly });
+      } else {
+        console.log(
+          `[pipeline] Skipping cleanup for interior — only exposure issues (${skippedIssues.join(", ")})`,
+        );
+      }
+    } else {
+      cleanedBase64 = await cleanupImage(
+        ai,
+        originalBase64,
+        classification.quality_issues,
+      );
+      console.log(
+        `[pipeline] Cleanup applied for issues: ${actionableIssues.join(", ")}`,
+      );
+      await updateJob(supabase, job.id, { quality_issues: actionableIssues });
+    }
+  }
+
+  const studioFile = await ensureStudioFile(
+    ai,
+    supabase,
+    job.studio_id,
+    studioImageBase64,
+  );
+  let generated = await runRouteGeneration({
+    ai,
+    category: effectiveCategory,
+    originalBase64: cleanedBase64,
+    originalAngle: job.original_angle,
+    angleFamily: classification.angle_family,
+    studioImageBase64,
+    studioFile,
+    qualityReference,
+    removeBgKey,
+    studioHints,
+  });
+  generated = await finalizePostGeneration({
+    ai,
+    category: effectiveCategory,
+    generatedBase64: generated,
+    studioImageBase64,
+    originalBase64: cleanedBase64,
+    studioHints,
+  });
+
+  // QA compares against the original upload (not cleaned) to catch identity changes,
+  // but uses cleanedBase64 for the generation context
+  let qa = await qaEvaluate(
+    ai,
+    originalBase64,
+    studioImageBase64,
+    generated,
+    effectiveCategory,
+    studioHints,
+  );
+  if (!qa.pass && qa.retry_recommended) {
+    generated = await runRouteGeneration({
+      ai,
+      category: effectiveCategory,
+      originalBase64: cleanedBase64,
+      originalAngle: job.original_angle,
+      angleFamily: classification.angle_family,
+      studioImageBase64,
+      studioFile,
+      qualityReference,
+      removeBgKey,
+      qaIssues: qa.issues,
+      studioHints,
+    });
+    generated = await finalizePostGeneration({
+      ai,
+      category: effectiveCategory,
+      generatedBase64: generated,
+      studioImageBase64,
+      originalBase64: cleanedBase64,
+      studioHints,
+      qaIssues: qa.issues,
+    });
+    qa = await qaEvaluate(
+      ai,
+      originalBase64,
+      studioImageBase64,
+      generated,
+      effectiveCategory,
+      studioHints,
+    );
+  }
+
+  const generatedRawUrl = await uploadImageToStorage(
+    supabase,
+    `${job.user_id}/${job.project_id}/jobs/${job.id}_generated_raw.png`,
+    generated,
+  );
+
+  await updateJob(supabase, job.id, {
+    status: qa.pass ? "completed" : "needs_review",
+    generated_raw_url: generatedRawUrl,
+    qa_status: qa.pass ? "passed" : "failed",
+    qa_issues: qa.issues,
+    qa_severity: qa.severity,
+    needs_review: !qa.pass,
+    error_message: qa.pass
+      ? null
+      : `QA flagged issues: ${qa.issues.join(", ")}`,
+  });
+}
+
+async function processQueuedJobs(params: {
+  ai: GoogleGenAI;
+  supabase: SupabaseClientAny;
+  projectId: string;
+  studioImageBase64: string;
+  removeBgKey?: string;
+  studioHints?: StudioHints;
+  qualityReference?: QualityReference | null;
+}): Promise<{ processed: number; remaining: number }> {
+  const { data: jobs, error } = await params.supabase
+    .from("generation_jobs")
+    .select(
+      "id,project_id,user_id,original_image_url,original_angle,studio_id,classification_override,attempt_count",
+    )
+    .eq("project_id", params.projectId)
+    // Also pick up jobs stuck in classifying/processing from a previously
+    // killed invocation so they are not orphaned forever.
+    .in("status", ["pending", "queued", "classifying", "processing"])
+    .order("created_at", { ascending: true });
+
+  if (error) throw error;
+
+  const pendingJobs = (jobs || []) as JobRow[];
+
+  if (pendingJobs.length === 0) {
+    return { processed: 0, remaining: 0 };
+  }
+
+  // Process up to 5 jobs concurrently per invocation.
+  const BATCH_CONCURRENCY = 5;
+  const batch = pendingJobs.slice(0, BATCH_CONCURRENCY);
+  console.log(
+    `[process-image] Processing batch of ${batch.length} jobs (${pendingJobs.length} total pending)`,
+  );
+
+  // Reset stuck intermediate-status jobs back to pending so they go through
+  // the full pipeline cleanly rather than being skipped by status guards.
+  for (const job of batch) {
+    if (
+      (job as any).status === "classifying" ||
+      (job as any).status === "processing"
+    ) {
+      console.warn(
+        `[queue] Job ${job.id} was stuck in "${(job as any).status}" — resetting to pending.`,
+      );
+      await params.supabase
+        .from("generation_jobs")
+        .update({ status: "pending", error_message: null })
+        .eq("id", job.id);
+    }
+  }
+
+  // Process batch concurrently
+  const results = await Promise.allSettled(
+    batch.map(async (job) => {
+      try {
+        await processGenerationJob({
+          ai: params.ai,
+          supabase: params.supabase,
+          job,
+          studioImageBase64: params.studioImageBase64,
+          removeBgKey: params.removeBgKey,
+          studioHints: params.studioHints,
+          qualityReference: params.qualityReference,
+        });
+      } catch (error) {
+        console.error("[generation-job] failed", job.id, error);
+        await updateJob(params.supabase, job.id, {
+          status: "failed",
+          qa_status: "failed",
+          needs_review: true,
+          error_message:
+            error instanceof Error ? error.message : String(error),
+        });
+      }
+    }),
+  );
+
+  await syncProjectSummary(params.supabase, params.projectId);
+
+  const processed = results.filter((r) => r.status === "fulfilled").length;
+  return { processed, remaining: pendingJobs.length - batch.length };
+}
+
+async function legacyProcessImage(params: {
+  ai: GoogleGenAI;
+  originalBase64: string;
+  studioImageBase64: string;
+  angle: string;
+  pipelineCategory?: string;
+  branding?: { isEnabled?: boolean; logoUrl?: string | null };
+  removeBgKey?: string;
+  studioHints?: StudioHints;
+  qualityReference?: QualityReference | null;
+}): Promise<{
+  processedImage: string;
+  classification: ClassificationResult;
+  qa: QAEvaluation;
+}> {
+  console.log(`[legacy] Received payload sizes:`);
+  console.log(
+    `[legacy]   originalBase64: ${((params.originalBase64?.length || 0) / 1024) | 0} kB`,
+  );
+  console.log(
+    `[legacy]   studioImageBase64: ${((params.studioImageBase64?.length || 0) / 1024) | 0} kB`,
+  );
+  console.log(
+    `[legacy]   studioImageBase64 starts: ${(params.studioImageBase64 || "").substring(0, 30)}`,
+  );
+  console.log(`[legacy]   qualityRef present: ${!!params.qualityReference}`);
+  const classification = await classifyImage(
+    params.ai,
+    params.originalBase64,
+    params.angle,
+  );
+  const effectiveCategory = params.pipelineCategory || classification.category;
+  console.log(
+    `[legacy] Category: ${effectiveCategory} (detected: ${classification.category}, override: ${params.pipelineCategory || "none"})`,
+  );
+  console.log(
+    `[legacy] Quality issues: ${classification.quality_issues.join(", ")}`,
+  );
+  console.log(
+    `[legacy] Studio hints: ${params.studioHints?.name || "none"}, tone: ${params.studioHints?.studioTone || "unknown"}`,
+  );
+
+  // Pre-generation cleanup pass
+  // For interiors: only clean artifact issues (photographer, obstruction) — skip exposure issues to avoid anchoring original lighting
+  const isInterior =
+    effectiveCategory === "INTERIOR" || effectiveCategory === "INTERIOR_DETAIL";
+  const ARTIFACT_ISSUES: QualityIssue[] = [
+    "photographer_visible",
+    "photographer_reflection",
+    "camera_obstruction",
+  ];
+  const actionableIssues = classification.quality_issues.filter(
+    (i) => i !== "none",
+  );
+
+  let cleanedBase64 = params.originalBase64;
+  if (actionableIssues.length > 0) {
+    if (isInterior) {
+      const artifactOnly = actionableIssues.filter((i) =>
+        ARTIFACT_ISSUES.includes(i),
+      );
+      const skippedIssues = actionableIssues.filter(
+        (i) => !ARTIFACT_ISSUES.includes(i),
+      );
+      if (artifactOnly.length > 0) {
+        console.log(
+          `[legacy] Interior cleanup: fixing artifacts (${artifactOnly.join(", ")}), skipping exposure issues (${skippedIssues.join(", ") || "none"})`,
+        );
+        cleanedBase64 = await cleanupImage(
+          params.ai,
+          params.originalBase64,
+          artifactOnly,
+        );
+      } else {
+        console.log(
+          `[legacy] Skipping cleanup for interior — only exposure issues (${skippedIssues.join(", ")})`,
+        );
+      }
+    } else {
+      cleanedBase64 = await cleanupImage(
+        params.ai,
+        params.originalBase64,
+        classification.quality_issues,
+      );
+    }
+  }
+
+  console.log(`[legacy] Running generation for ${effectiveCategory}...`);
+  const generated = await runRouteGeneration({
+    ai: params.ai,
+    category: effectiveCategory,
+    originalBase64: cleanedBase64,
+    originalAngle: params.angle,
+    angleFamily: classification.angle_family,
+    studioImageBase64: params.studioImageBase64,
+    studioFile: null,
+    qualityReference: params.qualityReference,
+    branding: params.branding,
+    removeBgKey: params.removeBgKey,
+    studioHints: params.studioHints,
+  });
+  console.log(
+    `[legacy] Generation complete. Running post-generation for ${effectiveCategory}...`,
+  );
+  const grounded = await finalizePostGeneration({
+    ai: params.ai,
+    category: effectiveCategory,
+    generatedBase64: generated,
+    studioImageBase64: params.studioImageBase64,
+    originalBase64: cleanedBase64,
+    studioHints: params.studioHints,
+  });
+  console.log(`[legacy] Post-generation complete. Running QA...`);
+  const qa = await qaEvaluate(
+    params.ai,
+    params.originalBase64,
+    params.studioImageBase64,
+    grounded,
+    effectiveCategory,
+    params.studioHints,
+  );
+  console.log(
+    `[legacy] QA result: pass=${qa.pass}, issues=[${qa.issues.join(", ")}], severity=${qa.severity}`,
+  );
+  return { processedImage: grounded, classification, qa };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
+    // ── API Key Pool: pick random key from comma-separated list ──
     const apiKeysRaw = Deno.env.get("GEMINI_API_KEY");
     const removeBgKey = Deno.env.get("REMOVE_BG_API_KEY");
+    const supabaseUrl =
+      Deno.env.get("PROJECT_SUPABASE_URL") || Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey =
+      Deno.env.get("PROJECT_SUPABASE_SERVICE_ROLE_KEY") ||
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!apiKeysRaw) throw new Error("GEMINI_API_KEY not configured");
+    if (!supabaseUrl || !serviceRoleKey)
+      throw new Error("Supabase service credentials not configured");
 
-    // Support comma-separated key pool for parallel load distribution
-    const apiKeys = apiKeysRaw.split(",").map(k => k.trim()).filter(Boolean);
+    const apiKeys = apiKeysRaw.split(",").map((k) => k.trim()).filter(Boolean);
     const apiKey = apiKeys[Math.floor(Math.random() * apiKeys.length)];
     console.log(`🔑 [KEY-POOL] Using key ${apiKeys.indexOf(apiKey) + 1}/${apiKeys.length}`);
 
-    const genAI = new GoogleGenerativeAI(apiKey);
+    const ai = new GoogleGenAI({ apiKey });
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
     const { action, payload } = await req.json();
 
-
-
-    // ── process-image ─────────────────────────────────────
-    if (action === "process-image") {
-      const result = await processCarImage(
-        genAI,
-        payload.originalBase64,
-        payload.studioImageBase64,
-        payload.angle,
-        payload.branding,
+    if (action === "process-generation-jobs") {
+      // Build the processing promise but do NOT await it before responding.
+      // EdgeRuntime.waitUntil keeps the isolate alive while the job runs in
+      // the background, so the HTTP response is returned to the frontend
+      // immediately — eliminating any client-side timeout regardless of how
+      // long the Gemini calls take.
+      const processingPromise = processQueuedJobs({
+        ai,
+        supabase,
+        projectId: payload.projectId,
+        studioImageBase64: payload.studioImageBase64,
         removeBgKey,
-        payload.studioHints
+        studioHints: payload.studioHints,
+        qualityReference: payload.qualityReference,
+      });
+
+      // @ts-ignore – EdgeRuntime is injected by the Supabase edge runtime
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
+        // @ts-ignore
+        EdgeRuntime.waitUntil(processingPromise);
+      } else {
+        // Local dev-serve or non-Supabase runtime: just await normally
+        await processingPromise;
+      }
+
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          status: "processing",
+          // remaining is unknown at this point since we didn't await;
+          // the frontend's poll loop will re-kickoff as needed.
+          remaining: 1,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
       );
-      return new Response(JSON.stringify({ processedImage: result }), {
+    }
+
+    if (action === "process-image") {
+      const result = await legacyProcessImage({
+        ai,
+        originalBase64: payload.originalBase64,
+        studioImageBase64: payload.studioImageBase64,
+        angle: payload.angle,
+        pipelineCategory: payload.pipelineCategory,
+        branding: payload.branding,
+        removeBgKey,
+        studioHints: payload.studioHints,
+        qualityReference: payload.qualityReference,
+      });
+      return new Response(JSON.stringify(result), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     return new Response(JSON.stringify({ error: "Unknown action" }), {
       status: 400,
-      headers: corsHeaders,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-
-  } catch (e) {
-    console.error("Function error:", e);
-    const msg = e instanceof Error ? e.message : "Internal server error";
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 500,
-      headers: corsHeaders,
-    });
+  } catch (error) {
+    console.error("process-image error:", error);
+    return new Response(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : "Internal server error",
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   }
 });
-
-
-
-// -----------------------------------------------------------
-// IMAGE CLASSIFICATION (Dev B)
-// Returns: category, confidence, angle_family, quality_issues
-// -----------------------------------------------------------
-type ClassificationResult = {
-  category: "EXTERIOR" | "EXTERIOR_DETAIL" | "INTERIOR" | "INTERIOR_DETAIL" | "REJECT";
-  confidence: number;
-  subject_type: string;
-  angle_family: string;
-  crop_lock: boolean;
-  notes: string[];
-  quality_issues: string[];
-};
-
-async function classifyImage(
-  ai: GoogleGenerativeAI,
-  originalBase64: string,
-  originalAngle: string
-): Promise<ClassificationResult> {
-  try {
-    const clean = stripDataPrefix(originalBase64);
-    const model = ai.getGenerativeModel({
-      model: MODEL_VISION,
-      generationConfig: { responseMimeType: "application/json", temperature: 0 },
-    });
-    const response = await model.generateContent({
-      contents: [{
-        role: "user",
-        parts: [
-          {
-            text: [
-              "Classify this automotive photo for a studio retouch pipeline.",
-              "",
-              "TASK 1 — CATEGORY: Choose from EXTERIOR, EXTERIOR_DETAIL, INTERIOR, INTERIOR_DETAIL, REJECT.",
-              "  • EXTERIOR: any shot where the vehicle body (or significant portion of it) is visible from outside — including close-up front/rear/side shots, three-quarter views, and partial car shots where the vehicle fills most of the frame. When in doubt between EXTERIOR and EXTERIOR_DETAIL, prefer EXTERIOR.",
-              "  • EXTERIOR_DETAIL: ONLY use this for an isolated single component shot — e.g. a wheel arch close-up with NO body panels visible, a badge close-up, or a headlight unit photographed in isolation. If the car body, bonnet, or door panels are visible anywhere in the frame, use EXTERIOR instead.",
-              "  • INTERIOR: full cabin/interior shot.",
-              "  • INTERIOR_DETAIL: close-up of a specific interior component (gauge cluster, stitching, screen, etc.).",
-              "  • REJECT: no vehicle present, completely unusable.",
-              "  crop_lock = true for detail shots or any view where crop must stay identical.",
-              "  Use the provided angle only as a weak hint, never as the final truth.",
-              "",
-              "TASK 2 — QUALITY ISSUES: Inspect the photo carefully and list ALL quality problems present.",
-              "  • photographer_visible: a person's hands, arms, body, or phone device is directly visible in the frame.",
-              "  • photographer_reflection: the photographer's silhouette, hands, or phone is reflected in the car's painted panels, chrome trim, glass, mirrors, instrument-cluster glass, infotainment screens, glossy piano-black trim, glossy wood trim, or chrome bezels.",
-              "  • camera_obstruction: a finger, phone case edge, or other object partially blocks the lens/frame edge.",
-              "  • motion_blur: the image is blurry due to camera shake or movement during capture.",
-              "  • out_of_focus: the main subject (vehicle/component) is soft or unfocused.",
-              "  • severe_noise: the image is very grainy or noisy (typical of low-light phone shots).",
-              "  • underexposed: the image is too dark to clearly see vehicle details.",
-              "  • overexposed: large areas are blown out / pure white with lost detail.",
-              "  • flash_glare: harsh flash reflection creates a bright glare spot on the vehicle surface.",
-              '  • none: the image is clean with none of the above issues.',
-              '  List every issue that is present. If the image is clean, return ["none"].',
-              "",
-              "OUTPUT — JSON only with these exact fields:",
-              '{ "category": "EXTERIOR"|"EXTERIOR_DETAIL"|"INTERIOR"|"INTERIOR_DETAIL"|"REJECT",',
-              '  "confidence": 0.0-1.0,',
-              '  "subject_type": "full_vehicle"|"cabin"|"component"|"invalid",',
-              '  "angle_family": "front"|"rear"|"side"|"three_quarter"|"interior"|"detail"|"unknown",',
-              '  "crop_lock": true|false,',
-              '  "notes": ["..."],',
-              '  "quality_issues": ["none"|"photographer_visible"|"photographer_reflection"|...] }',
-            ].join("\n"),
-          },
-          { text: `Original angle hint: ${originalAngle || "unknown"}` },
-          { inlineData: { data: clean, mimeType: "image/jpeg" } },
-        ],
-      }],
-    });
-    const data = JSON.parse(response.response.text());
-    console.log(`📊 [TOKENS] classifyImage → in:${response.response.usageMetadata?.promptTokenCount} out:${response.response.usageMetadata?.candidatesTokenCount} total:${response.response.usageMetadata?.totalTokenCount}`);
-    console.log(`🔍 [CLASSIFY] category=${data.category} confidence=${data.confidence} angle=${data.angle_family} issues=${JSON.stringify(data.quality_issues)}`);
-
-    return {
-      category: data.category || "REJECT",
-      confidence: typeof data.confidence === "number" ? data.confidence : 0,
-      subject_type: data.subject_type || "invalid",
-      angle_family: data.angle_family || "unknown",
-      crop_lock: Boolean(data.crop_lock),
-      notes: Array.isArray(data.notes) ? data.notes : [],
-      quality_issues: Array.isArray(data.quality_issues) ? data.quality_issues : ["none"],
-    };
-  } catch (err) {
-    console.warn("⚠️ [CLASSIFY] classifyImage failed:", err);
-    return {
-      category: "EXTERIOR",
-      confidence: 0,
-      subject_type: "full_vehicle",
-      angle_family: "unknown",
-      crop_lock: false,
-      notes: ["classification failed — defaulting to EXTERIOR"],
-      quality_issues: ["none"],
-    };
-  }
-}
-
-// -----------------------------------------------------------
-// MAIN PIPELINE ROUTER
-// -----------------------------------------------------------
-async function processCarImage(
-  ai: GoogleGenerativeAI,
-  originalBase64: string,
-  studioBase64: string,
-  angle: string,
-  branding?: { isEnabled?: boolean; logoUrl?: string | null },
-  removeBgKey?: string,
-  studioHints?: { lightingProfile?: string; studioTone?: string; floorFinish?: string; exposureNote?: string; platformType?: string; name?: string }
-): Promise<string> {
-
-  console.log(`\n════════════════════════════════════════════`);
-  console.log(`🚀 [ROUTER] PIPELINE START — angle: ${angle}`);
-  console.log(`════════════════════════════════════════════`);
-
-  // Interior & Detail shots: no bg removal needed
-  if (angle === "INTERIOR_CAR") {
-    console.log("📷 [ROUTER] → Interior path");
-    //const cleanedImage = await fixSunArtifacts(ai, originalBase64);
-    //const result = await refineInterior(ai, cleanedImage, studioBase64, branding);
-    const result = await refineInterior(ai, originalBase64, studioBase64, branding);
-    console.log("✅ [ROUTER] PIPELINE COMPLETE");
-    return result;
-  }
-
-  if (angle === "DETAIL_CAR") {
-    console.log("✨ [ROUTER] → Detail path — classifying...");
-    const classification = await classifyImage(ai, originalBase64, angle);
-    const detailType = classification.category === "INTERIOR_DETAIL" || classification.category === "INTERIOR" ? "INTERIOR" : "EXTERIOR";
-    console.log(`✨ [CLASSIFY] Detail sub-type: ${detailType} (raw: ${classification.category}, confidence: ${classification.confidence})`);
-    if (detailType === "INTERIOR") {
-      return refineDetailInterior(ai, originalBase64, studioBase64, branding, studioHints);
-    } else {
-      // Detail exterior: skip remove.bg — send original directly
-      // remove.bg fails on tight close-ups, producing bad cutouts
-      // that cause Gemini to hallucinate a full car (zoom-out bug)
-      console.log("🔧 [DETAIL-EXT] Direct composite (no bg removal)");
-      const carFixed = await fixReflectionsDetailExterior(ai, originalBase64);
-      const result = await refineDetailExterior(
-        ai,
-        carFixed,
-        studioBase64,
-        angle,
-        branding
-      );
-
-      console.log("✅ [ROUTER] PIPELINE COMPLETE");
-      return result;
-    }
-  }
-
-  if (angle === "INTERIOR_DETAIL_CAR") {
-    console.log("🔎 [ROUTER] → Interior Detail path (explicit angle)");
-    return refineDetailInterior(ai, originalBase64, studioBase64, branding, studioHints);
-  }
-
-  // AUTO or unknown angle — classify first, then route
-  if (angle === "AUTO" || !angle) {
-    console.log("🔍 [ROUTER] AUTO — running classification...");
-    const classification = await classifyImage(ai, originalBase64, angle || "AUTO");
-    console.log(`🔍 [CLASSIFY] Result: ${classification.category} (confidence: ${classification.confidence}, angle: ${classification.angle_family}, issues: ${JSON.stringify(classification.quality_issues)})`);
-
-    if (classification.category === "INTERIOR") {
-      console.log("📷 [ROUTER] AUTO → Interior");
-      const result = await refineInterior(ai, originalBase64, studioBase64, branding);
-      console.log("✅ [ROUTER] PIPELINE COMPLETE");
-      return result;
-    }
-    if (classification.category === "INTERIOR_DETAIL") {
-      console.log("🔎 [ROUTER] AUTO → Interior Detail");
-      return refineDetailInterior(ai, originalBase64, studioBase64, branding, studioHints);
-    }
-    if (classification.category === "EXTERIOR_DETAIL") {
-      console.log("✨ [ROUTER] AUTO → Exterior Detail");
-      const carFixed = await fixReflectionsDetailExterior(ai, originalBase64);
-      const result = await refineDetailExterior(ai, carFixed, studioBase64, angle, branding);
-      console.log("✅ [ROUTER] PIPELINE COMPLETE");
-      return result;
-    }
-    if (classification.category === "REJECT") {
-      console.warn("❌ [ROUTER] AUTO → REJECT — fallback to Exterior");
-    }
-    // Confidence guard: if classified as EXTERIOR but confidence is low, prefer interior (safer pipeline)
-    if (classification.category === "EXTERIOR" && classification.confidence < 0.7) {
-      console.warn(`⚠️ [ROUTER] AUTO → EXTERIOR but low confidence (${classification.confidence}) — rerouting to Interior as safety fallback`);
-      const result = await refineInterior(ai, originalBase64, studioBase64, branding);
-      console.log("✅ [ROUTER] PIPELINE COMPLETE");
-      return result;
-    }
-    // EXTERIOR or REJECT fallthrough → exterior pipeline below
-    console.log("🚗 [ROUTER] AUTO → Exterior");
-  }
-
-  // Exterior path: remove bg → composite JSON → AI studio compositor
-  // Wrapped with fallback: if model detects interior shot, re-route automatically
-  try {
-    console.log("📸 [EXTERIOR] Step 1/3: Background removal");
-    const carNoBg = await removeBackground(originalBase64, removeBgKey);
-    const carFixed = await fixReflections(ai, carNoBg);
-
-    console.log("🎨 [EXTERIOR] Step 2/3: Packaging composite payload");
-    const compositePayload = JSON.stringify({
-      car: carFixed, //carNoBg,
-      background: studioBase64,
-      operation: "composite",
-    });
-
-    console.log("✨ [EXTERIOR] Step 3/3: AI studio compositor");
-    const result = await refineExterior(ai, compositePayload, angle, branding);
-
-    console.log("✅ [ROUTER] PIPELINE COMPLETE\n");
-    return result;
-  } catch (extErr: any) {
-    const errMsg = (extErr?.message || String(extErr)).toLowerCase();
-    if (errMsg.includes("interior") || errMsg.includes("steering wheel") || errMsg.includes("not the full car") || errMsg.includes("not a full car")) {
-      console.warn("⚠️ [ROUTER] Exterior pipeline detected interior shot — re-routing to Interior pipeline...");
-      const result = await refineInterior(ai, originalBase64, studioBase64, branding);
-      console.log("✅ [ROUTER] PIPELINE COMPLETE (re-routed from Exterior → Interior)");
-      return result;
-    }
-    throw extErr; // Re-throw if it's a different error
-  }
-}
-
-// -----------------------------------------------------------
-// STEP 1.5 — REFLECTION FIX
-// -----------------------------------------------------------
-async function fixReflections(ai: GoogleGenerativeAI, carBase64: string): Promise<string> {
-  const clean = stripDataPrefix(carBase64);
-  const model = ai.getGenerativeModel({
-    model: MODEL_IMAGE,
-    generationConfig: { temperature: 0.35, topP: 0.6, topK: 20, candidateCount: 1 },
-  });
-  try {
-    const response = await model.generateContent({
-      contents: [{
-        role: "user", parts: [
-          {
-            text: `Remove all environment-specific reflections from this car's paint.
-Strip: dealership walls, indoor ceiling colors, window light streaks, floor color bleed, any location-specific color visible in the paint.
-Replace with: neutral flat mid-tone reflections — no color, no warmth, no coolness.
-Keep everything else identical — shape, color, plate, lights, wheels.
-The goal is a clean neutral base so the final compositor can apply correct reflections from the actual studio background.` },
-          { inlineData: { data: clean, mimeType: "image/png" } },
-        ]
-      }],
-    });
-    const imagePart = response.response.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
-    console.log(`   [TOKENS][fixReflections] input:${response.response.usageMetadata?.promptTokenCount} output:${response.response.usageMetadata?.candidatesTokenCount} total:${response.response.usageMetadata?.totalTokenCount}`);
-
-    if (!imagePart?.inlineData?.data) return carBase64;
-    return `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
-  } catch {
-    return carBase64;
-  }
-}
-
-async function fixReflectionsDetail(ai: GoogleGenerativeAI, carBase64: string): Promise<string> {
-  const clean = stripDataPrefix(carBase64);
-  const model = ai.getGenerativeModel({
-    model: MODEL_IMAGE,
-    generationConfig: { temperature: 0.1, topP: 0.3, topK: 5, candidateCount: 1 },
-  });
-  try {
-    const response = await model.generateContent({
-      contents: [{
-        role: "user", parts: [
-          {
-            text: `Remove environment-specific reflections from this close-up car component photo.
-
-⚠ FRAMING IS LOCKED — this is a cropped close-up, NOT a full car shot:
-- DO NOT zoom out or show more of the car than is visible
-- DO NOT complete or extend any partially visible edges
-- Output must be the EXACT same crop and framing as input
-
-ONLY remove these reflections from the paint/surfaces:
-- Sky, clouds, outdoor reflections visible in the paint
-- Concrete wall or building reflections
-- Sunlight patches or outdoor light streaks
-
-Replace with: neutral flat mid-tone — no color, no warmth, no coolness.
-Keep everything else pixel-identical — same crop, same zoom, same edges.` },
-          { inlineData: { data: clean, mimeType: "image/png" } },
-        ]
-      }],
-    });
-    const imagePart = response.response.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
-    if (!imagePart?.inlineData?.data) return carBase64;
-    return `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
-  } catch {
-    return carBase64;
-  }
-}
-
-async function fixReflectionsDetailExterior(ai: GoogleGenerativeAI, carBase64: string): Promise<string> {
-  const clean = stripDataPrefix(carBase64);
-  const model = ai.getGenerativeModel({
-    model: MODEL_IMAGE,
-    generationConfig: { temperature: 0.65, topP: 0.4, topK: 10, candidateCount: 1 },
-  });
-  try {
-    const response = await model.generateContent({
-      contents: [{
-        role: "user", parts: [
-          {
-            text: `THIS IS A REFLECTION CLEANUP TASK ONLY — NOT A COMPOSITING TASK.
-
-⚠ FRAMING IS ABSOLUTELY LOCKED:
-- Output must be pixel-for-pixel the same crop, zoom, and framing as the input
-- DO NOT zoom out under any circumstances
-- DO NOT show more of the car than is visible in the input
-- DO NOT extend or complete partially visible edges or panels
-- DO NOT reframe or recompose in any way
-- The only thing that changes is surface reflections — nothing else
-
-REMOVE ALL OF THESE from painted surfaces — ZERO TOLERANCE:
-
-• CIRCULAR CEILING LIGHT HOTSPOTS — bright round white/yellow spots on hood, roof, or any panel
-  caused by dealership overhead spotlights or ceiling lights → REMOVE COMPLETELY
-  Replace with: smooth paint gradient matching the surrounding panel color and tone
-  There must be NO round bright patches anywhere on any panel after this step
-
-• FLUORESCENT STRIP REFLECTIONS — long linear bright streaks from indoor strip lighting → REMOVE
-• Any rectangular or linear bright patch from indoor lighting fixtures → REMOVE
-• Indoor ceiling tile patterns or grid reflections visible in paint → REMOVE
-• Dealership wall colors, banners, or logos reflected in paint → REMOVE
-• Warm orange/amber floor glow on lower panels → REMOVE
-• Floor tile patterns or grout lines reflected in lower panels → REMOVE
-• Window light patches and daylight streaks → REMOVE
-• ANY shape, pattern, or color that belongs to the original shooting location → REMOVE
-
-AFTER REMOVAL — the paint surface must show ONLY:
-• Smooth clean gloss with natural paint color
-• Subtle natural body contour gradients — darker in recessed areas, lighter on raised surfaces
-• NO round hotspots, NO linear streaks, NO location-specific shapes anywhere
-
-⚠ DO NOT change the car's paint color
-⚠ DO NOT flatten or remove natural gloss — keep the paint looking glossy and rich
-⚠ DO NOT turn glossy paint into matte
-⚠ Natural specular highlights that follow the body contour shape are fine — keep them
-⚠ Only remove LOCATION-SPECIFIC artifacts — not the car's natural finish
-
-KEEP UNCHANGED:
-• Original paint color — fully saturated, unchanged
-• All badges, plates, trim, lights exactly as they are
-• Metallic flake texture and clearcoat depth
-• Same crop. Same zoom. Same framing. Only reflections change.`,
-          },
-          { inlineData: { data: clean, mimeType: "image/png" } },
-        ]
-      }],
-    });
-    const imagePart = response.response.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
-    console.log(`   [TOKENS][fixReflectionsDetailExterior] input:${response.response.usageMetadata?.promptTokenCount} output:${response.response.usageMetadata?.candidatesTokenCount} total:${response.response.usageMetadata?.totalTokenCount}`);
-
-    if (!imagePart?.inlineData?.data) return carBase64;
-    console.log("Reflection cleanup applied");
-    return `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
-  } catch {
-    return carBase64;
-  }
-}
-
-async function fixReflectionsInterior(
-  ai: GoogleGenerativeAI,
-  imageBase64: string
-): Promise<string> {
-
-  const clean = stripDataPrefix(imageBase64);
-
-  const model = ai.getGenerativeModel({
-    model: MODEL_IMAGE,
-    generationConfig: {
-      temperature: 0.15,
-      topP: 0.30,
-      topK: 10,
-      candidateCount: 1,
-    },
-  });
-
-  try {
-    const response = await model.generateContent({
-      contents: [{
-        role: "user",
-        parts: [
-          {
-            text: `THIS IS A REFLECTION CLEANUP TASK ONLY.
-
-You are editing the EXTERIOR body panels visible in this interior/boot shot.
-The car has exterior panels visible (rear quarters, bumper, boot lid) that have reflections from the original shooting location — outdoor daylight, street reflections, building reflections, showroom lighting.
-
-YOUR ONLY JOB:
-Remove all location-specific reflections from the EXTERIOR BODY PANELS only.
-
-REMOVE from exterior painted surfaces:
-- Outdoor daylight streaks and sky reflections in the paint
-- Street, building, or tree reflections in the paint  
-- Showroom ceiling or wall colors visible in the paint
-- Warm or cool color casts from the original location environment
-- Any shape or color that belongs to the shooting location visible in the paint
-
-REPLACE WITH:
-- Neutral flat mid-tone on each panel — no color, no warmth, no coolness
-- Smooth clean gloss with no location-specific artifacts
-- The goal is a neutral base so the studio compositor can apply correct reflections
-
-DO NOT TOUCH:
-❌ Anything inside the car — carpet, seats, trim, panels — leave completely unchanged
-❌ The tail lights / lamp units — leave exactly as-is
-❌ The camera framing — do not zoom, crop, or reframe
-❌ The car's paint base color — only remove location reflections, not the color itself
-❌ Natural gloss and specular highlights that are part of the paint finish`
-          },
-          { inlineData: { data: clean, mimeType: "image/jpeg" } },
-        ]
-      }],
-    });
-
-    const imagePart = response.response.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
-    if (!imagePart?.inlineData?.data) return imageBase64;
-
-    console.log("   ✓ Interior reflection fix applied");
-    return `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
-
-  } catch (err) {
-    console.warn("   ⚠ Reflection fix failed, using original:", err);
-    return imageBase64;
-  }
-}
-
-// -----------------------------------------------------------
-// STEP 1 — BACKGROUND REMOVAL
-// -----------------------------------------------------------
-
-
-async function removeBackground(
-  imageBase64: string,
-  apiKey?: string
-): Promise<string> {
-
-  const clean = stripDataPrefix(imageBase64);
-
-  if (apiKey) {
-    try {
-      console.log("   remove.bg API...");
-      const fd = new FormData();
-      fd.append("image_file_b64", clean);
-      fd.append("size", "auto");
-      fd.append("format", "png");
-
-      const res = await fetch(REMBG_API, {
-        method: "POST",
-        headers: { "X-Api-Key": apiKey },
-        body: fd,
-      });
-
-      if (res.ok) {
-        const buf = await res.arrayBuffer();
-        const b64 = btoa(String.fromCharCode(...Array.from(new Uint8Array(buf))));
-        console.log("   ✓ remove.bg success");
-        return `data:image/png;base64,${b64}`;
-      }
-      console.warn("   remove.bg non-OK, falling back");
-    } catch (err) {
-      console.warn("   remove.bg error:", err);
-    }
-  }
-
-  // Fallback: return original (AI compositor handles bg implicitly)
-  console.log("   ⚠ Using original (no bg key or remove.bg failed)");
-  return imageBase64;
-}
-
-async function removeBackgroundDetailShot(
-  imageBase64: string,
-  apiKey?: string
-): Promise<string> {
-  const clean = stripDataPrefix(imageBase64);
-
-  console.log(`   Input prefix: ${imageBase64.substring(0, 50)}`);
-  console.log(`   Clean base64 start: ${clean.substring(0, 50)}`);
-  console.log(`   Clean base64 length: ${clean.length}`);
-
-  if (apiKey) {
-    try {
-      console.log("   remove.bg detail shot (standard)...");
-
-      // Detect actual mime type from magic bytes
-      const headerBytes = Uint8Array.from(atob(clean.slice(0, 20)), c => c.charCodeAt(0));
-      let mimeType = "image/jpeg";
-      if (headerBytes[0] === 0x89 && headerBytes[1] === 0x50) mimeType = "image/png";
-      else if (headerBytes[0] === 0xFF && headerBytes[1] === 0xD8) mimeType = "image/jpeg";
-      else if (headerBytes[0] === 0x52 && headerBytes[1] === 0x49) mimeType = "image/webp";
-      console.log(`   Detected mime type: ${mimeType}`);
-
-      const byteArray = Uint8Array.from(atob(clean), c => c.charCodeAt(0));
-      const blob = new Blob([byteArray], { type: mimeType });
-      const ext = mimeType.split("/")[1];
-
-      const fd = new FormData();
-      fd.append("image_file", blob, `car.${ext}`);
-      fd.append("size", "auto");
-      fd.append("format", "png");
-
-      const res = await fetch(REMBG_API, {
-        method: "POST",
-        headers: { "X-Api-Key": apiKey },
-        body: fd,
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        console.warn(`   remove.bg detail shot failed: ${res.status} — ${errText}`);
-      } else {
-        const buf = await res.arrayBuffer();
-        const responseBytes = new Uint8Array(buf);
-        let b64 = "";
-        const chunkSize = 8192;
-        for (let i = 0; i < responseBytes.length; i += chunkSize) {
-          const chunk = responseBytes.subarray(i, i + chunkSize);
-          let chunkStr = "";
-          for (let j = 0; j < chunk.length; j++) {
-            chunkStr += String.fromCharCode(chunk[j]);
-          }
-          b64 += chunkStr;
-        }
-        b64 = btoa(b64);
-        console.log("   ✓ remove.bg detail shot success");
-        return `data:image/png;base64,${b64}`;
-      }
-    } catch (err) {
-      console.warn("   remove.bg detail shot error:", err);
-    }
-  }
-
-  console.log("   ⚠ Using original (no bg key or remove.bg failed)");
-  return imageBase64;
-}
-
-async function removeBackgroundDetail(
-  imageBase64: string,
-  apiKey?: string
-): Promise<string> {
-  const clean = stripDataPrefix(imageBase64);
-
-  if (apiKey) {
-    try {
-      console.log("   ClipDrop API for detail shot...");
-      const blob = new Blob(
-        [Uint8Array.from(atob(clean), c => c.charCodeAt(0))],
-        { type: "image/jpeg" }
-      );
-      const fd = new FormData();
-      fd.append("image_file", blob, "car.jpg");
-
-      const res = await fetch("https://clipdrop-api.co/remove-background/v1", {
-        method: "POST",
-        headers: { "x-api-key": apiKey },
-        body: fd,
-      });
-
-      if (res.ok) {
-        const buf = await res.arrayBuffer();
-        const b64 = btoa(String.fromCharCode(...Array.from(new Uint8Array(buf))));
-        console.log("   ✓ ClipDrop success");
-        return `data:image/png;base64,${b64}`;
-      }
-      console.warn("   ClipDrop non-OK, falling back");
-    } catch (err) {
-      console.warn("   ClipDrop error:", err);
-    }
-  }
-
-  console.log("   ⚠ Using original");
-  return imageBase64;
-}
-
-// -----------------------------------------------------------
-// STEP 3 — EXTERIOR STUDIO COMPOSITOR
-// Key fix: single, focused prompt with no contradictions
-// -----------------------------------------------------------
-async function refineExterior(
-  ai: GoogleGenerativeAI,
-  compositedData: string,
-  angle: string,
-  branding?: { isEnabled?: boolean; logoUrl?: string | null }
-): Promise<string> {
-
-  let carImage: string;
-  let studioImage: string;
-
-  try {
-    const data = JSON.parse(compositedData);
-    carImage = data.car;
-    studioImage = data.background;
-  } catch {
-    carImage = compositedData;
-    studioImage = "";
-  }
-
-  const isOpen = angle.includes("OPEN");
-
-  const promptRole = `You are an automotive studio compositor.
-Your tools are: background replacement, lighting adjustment, surface reflection editing, and ground shadow generation.
-You do NOT retouch, repair, redesign, or restructure vehicles in any way.`;
-
-  const promptTargetVision = `TARGET OUTPUT VISION:
-The car must look like it was originally photographed in the studio environment shown in Image 2.
-Study Image 2 carefully — its floor color, wall color, lighting color, brightness, and mood.
-Every decision you make must be driven by what Image 2 looks like — not by any assumed studio style.
-The final result must feel like a single cohesive photograph taken in that exact environment.`;
-
-  const promptTaskBackground = `═══ TASK A — BACKGROUND REPLACEMENT ═══
-Replace EVERYTHING that is NOT the car with the studio environment from Image 2.
-- Preserve the car's silhouette, position, and camera angle exactly — do NOT reframe
-- Blend the car's edges smoothly into the floor and walls of Image 2 — no hard cutout lines
-- The floor from Image 2 extends naturally beneath and around all four corners of the car
-- Match the ambient colour temperature at the car's edges to the environment in Image 2`;
-
-  const promptTaskReflections = `═══ TASK B — SURFACE REFLECTION UPDATE ═══
-
-STEP 1 — READ IMAGE 2: Study the studio background carefully.
-Note its dominant light color (warm, cool, neutral), brightness, and floor color.
-All reflections you apply to the car must come from THIS environment — not from a generic white studio.
-
-STEP 2 — READ IMAGE 1: Identify the car's paint color (black, white, grey, silver, red, blue, etc.)
-
-STEP 3 — STRIP ALL ORIGINAL ENVIRONMENT REFLECTIONS from every body panel:
-These must always be removed regardless of paint color or shooting angle:
-- Dealership walls, banners, logos visible in the paint → REMOVE
-- Ceiling tiles, fluorescent strips, indoor lighting colors → REMOVE
-- Window light streaks, natural daylight patches → REMOVE
-- Warm orange/amber floor glow on lower panels → REMOVE
-- Any color belonging to the original shooting location → REMOVE
-
-STEP 4 — APPLY REFLECTIONS FROM IMAGE 2's ENVIRONMENT:
-The reflection color, brightness, and tone must match Image 2's lighting — not assumed white:
-
-FOR LIGHT PAINT (white, silver, light grey, champagne):
-- Upper panel edge: bright highlight streak matching Image 2's light source color
-- Main panel: smooth horizontal gradient in Image 2's ambient tone
-- Lower panel: slightly deeper, fading toward floor color from Image 2
-
-FOR MEDIUM PAINT (grey, graphite, dark silver, bronze, brown):
-- Upper panel edge: sharp highlight streak from Image 2's light source
-- Shoulder crease: secondary thinner highlight along body line
-- Main panel: neutral mid-tone matching Image 2's ambient color temperature
-- Lower panel: deeper tone fading down — no warm bleed unless Image 2 floor is warm
-
-FOR DARK PAINT (black, dark navy, dark green, dark red):
-- Upper panel edge: sharp narrow highlight from Image 2's light source
-- Shoulder crease: second thinner streak along body crease
-- Everything else: deep intentional dark — correct for dark paint
-- Only permit warm tones if Image 2's environment is genuinely warm-toned
-- If Image 2 is neutral/cool — NO amber, NO orange anywhere on dark panels
-
-FOR BRIGHT/SATURATED PAINT (red, blue, yellow, orange, green):
-- Keep base color fully saturated — do not grey it out
-- Highlights blend naturally from Image 2's light source color into the base hue
-- No foreign color mixing into the base hue
-
-APPLY TO ALL SURFACES EQUALLY — front, sides, AND rear panels must all match:
-- Rear panels and trunk lid are most likely to retain original environment reflections — treat with extra care
-- Chrome/trim: clean highlight from Image 2's light source, no original environment bleed
-- Glass/windscreen: faint reflection of Image 2's ceiling/upper environment
-- Tail lights and head lights: keep their natural color — do not alter`;
-
-  const promptTaskLighting = `═══ TASK C — LIGHTING MATCH ═══
-Match the car's lighting to Image 2's environment exactly:
-- Study Image 2 — is the lighting warm, cool, or neutral? Bright or moody? Directional or diffuse?
-- Apply that same lighting character to the car body
-- Remove all original directional shadows or harsh highlights from the car
-- Metallic/glossy paint must hold mid-tone detail — do NOT blow any surface to pure featureless white or black
-- The car's overall brightness and color temperature must match Image 2 seamlessly
-- The car must not look pasted in from a different exposure or lighting environment`;
-
-  const promptTaskShadows = `═══ TASK D — SHADOW & GROUNDING ═══
-Ground the car physically in the floor shown in Image 2:
-
-Study Image 2's floor — note its color, reflectivity, and any existing shadows or markings.
-All grounding elements must be consistent with that floor.
-
-Tyre contact shadows (required for each visible tyre):
-- Darkest exactly at rubber-to-floor contact point
-- Softens and fades outward naturally — consistent with Image 2's lighting direction
-- Each tyre must look compressed against the floor, not hovering
-
-Vehicle undercar shadow:
-- Soft shadow fans outward from under the chassis
-- Darkness and spread consistent with Image 2's lighting intensity
-- Blends naturally into the floor — no sharp outer boundary
-
-Floor reflection (if Image 2's floor is glossy or reflective):
-- Add a subtle reflection of the car's lower surfaces in the floor
-- Match the reflectivity level visible in Image 2 — do not add gloss if Image 2 floor is matte
-
-If Image 2 has a turntable ring or floor markings — include them naturally beneath the car.`;
-
-  const promptPreservation = `═══ WHAT MUST NEVER CHANGE ═══
-
-❌ Camera angle — locked from Image 1
-   Whatever angle is in Image 1 (front, rear, side, 3/4, diagonal) — output must match exactly
-   Any angle change = automatic failure
-
-❌ Car orientation — no mirroring or flipping of any kind
-   Every visible feature must be on the same side as in Image 1
-
-❌ Car geometry — proportions, shape, and all body panels unchanged
-
-❌ Damage — every scratch, dent, crumple, and broken piece stays fully visible
-   Do NOT repair, smooth, heal, or hide any damage
-
-❌ Paint colour — base hue is fixed, do not shift it
-
-❌ ${angle.includes("OPEN") ? "Open positions — doors/trunk/hood open in Image 1 STAY open" : "Closed state — all doors, hood, and trunk stay closed as in Image 1"}
-
-❌ Attached objects — number plates, tow bars, stickers all stay on
-
-❌ Interior — cabin completely unchanged
-
-LICENCE PLATE RULE:
-If a licence plate is visible in Image 1 — reproduce it exactly in the output.
-Same characters, same colors, same position on the car.
-If the plate is not visible from the shooting angle — do not invent one.`;
-
-  const promptOutputSpec = `═══ OUTPUT SPECIFICATION ═══
-- Aspect ratio: 4:3 (landscape)
-- Car occupies 75–80% of frame width — comfortable breathing room on all sides
-- Final image must feel like a single professional studio photograph taken in Image 2's environment — not a composite
-${branding?.isEnabled ? "• BRANDING: Place the logo (Image 3) in the top-left corner — small and unobtrusive" : ""}`;
-  //console.log(`   [BRANDING] isEnabled:${branding?.isEnabled} applyToPlate:${branding?.applyToPlate} hasLogo:${!!branding?.logoUrl}`);
-  // -----------------------------------------------------------
-  // FINAL ASSEMBLY — this is your newPrompt
-  // Reorder sections here to shift model priority weighting.
-  // -----------------------------------------------------------
-  const newPrompt = [
-    promptRole,
-    promptTargetVision,
-    promptTaskReflections,
-    promptTaskBackground,
-    promptTaskLighting,
-    promptTaskShadows,
-    promptPreservation,
-    promptOutputSpec,
-  ].join("\n\n");
-
-  return generateImage(ai, carImage, studioImage, branding, newPrompt);
-}
-
-// -----------------------------------------------------------
-// INTERIOR REFINEMENT
-// -----------------------------------------------------------
-// async function refineInterior(
-//     ai: GoogleGenerativeAI,
-//     image: string,
-//     studio: string,
-//     branding?: { isEnabled?: boolean; logoUrl?: string | null }
-// ): Promise<string> {
-
-//     const prompt = `You are an automotive interior photography specialist.
-
-// YOUR ONLY JOB:
-// Replace everything visible OUTSIDE the car (through windows, openings) with the studio
-// environment from Image 2. Everything inside the car stays pixel-perfect identical.
-
-// KEEP UNCHANGED:
-// - All interior surfaces: seats, carpet, door panels, dashboard, trim, cargo area
-// - Interior lighting and shadows exactly as they appear
-// - Camera angle and framing
-
-// REPLACE:
-// - Outdoor/street background visible through windows → studio environment (Image 2)
-// - Match the ambient light color inside the car softly to the studio temperature
-
-// PROHIBITIONS:
-// :x: Do not change anything inside the car
-// :x: Do not alter interior lighting strength
-// :x: Do not add or remove interior elements
-// :x: Do not change the camera angle
-
-// OUTPUT: Aspect ratio 4:3
-// ${branding?.isEnabled ? "\nBRANDING: Logo (Image 3) top-left corner, small." : ""}`;
-
-//     return generateImage(ai, image, studio, branding, prompt);
-// }
-
-// -----------------------------------------------------------
-// INTERIOR STUDIO COMPOSITOR
-// Mirrors refineExterior exactly — same structure, different prompt.
-// The car has bg removed. Place it into the studio background
-// and match interior lighting/ambience to that environment.
-// -----------------------------------------------------------
-// -----------------------------------------------------------
-// INTERIOR STUDIO COMPOSITOR
-// ⚠ DOES NOT use generateImage() — builds parts array manually.
-// generateImage() labels Image 1 as "car, preserve geometry exactly"
-// which causes Gemini to render the full exterior car body.
-// Interior shots need "interior/boot shot" framing labels so Gemini
-// knows to ONLY replace the background through openings, not repaint the car.
-// -----------------------------------------------------------
-
-// -----------------------------------------------------------
-// INTERIOR STUDIO COMPOSITOR
-// ⚠ DOES NOT use generateImage() — builds parts array manually.
-// generateImage() labels Image 1 as "car, preserve geometry exactly"
-// which causes Gemini to render the full exterior car body.
-// Interior shots need "interior/boot shot" framing labels so Gemini
-// knows to ONLY replace the background through openings, not repaint the car.
-// Generic prompts — works for ANY interior shot type:
-// boot/trunk, cabin, driver seat, rear seat, dashboard, door-open, etc.
-// -----------------------------------------------------------
-
-async function decodePNG(base64: string): Promise<{ width: number; height: number; pixels: Uint8Array }> {
-  const clean = base64.includes(",") ? base64.split(",")[1] : base64;
-  const bytes = Uint8Array.from(atob(clean), c => c.charCodeAt(0));
-
-  // Use browser-compatible approach: fetch as blob and createImageBitmap
-  // In Deno, we use the built-in DecompressionStream for zlib
-
-  // Parse PNG chunks
-  let offset = 8; // Skip PNG signature
-  let width = 0, height = 0, bitDepth = 0, colorType = 0;
-  const idatChunks: Uint8Array[] = [];
-
-  while (offset < bytes.length) {
-    const chunkLen = (bytes[offset] << 24 | bytes[offset + 1] << 16 | bytes[offset + 2] << 8 | bytes[offset + 3]) >>> 0;
-    const chunkType = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
-    const chunkData = bytes.slice(offset + 8, offset + 8 + chunkLen);
-
-    if (chunkType === "IHDR") {
-      width = (chunkData[0] << 24 | chunkData[1] << 16 | chunkData[2] << 8 | chunkData[3]) >>> 0;
-      height = (chunkData[4] << 24 | chunkData[5] << 16 | chunkData[6] << 8 | chunkData[7]) >>> 0;
-      bitDepth = chunkData[8];
-      colorType = chunkData[9];
-    } else if (chunkType === "IDAT") {
-      idatChunks.push(chunkData);
-    } else if (chunkType === "IEND") {
-      break;
-    }
-
-    offset += 12 + chunkLen;
-  }
-
-  // Decompress IDAT data using DecompressionStream
-  const combined = new Uint8Array(idatChunks.reduce((acc, c) => acc + c.length, 0));
-  let pos = 0;
-  for (const chunk of idatChunks) {
-    combined.set(chunk, pos);
-    pos += chunk.length;
-  }
-
-  const ds = new DecompressionStream("deflate");
-  const writer = ds.writable.getWriter();
-  writer.write(combined);
-  writer.close();
-
-  const reader = ds.readable.getReader();
-  const chunks: Uint8Array[] = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-  }
-
-  const rawSize = (width * (colorType === 6 ? 4 : 3) + 1) * height;
-  const raw = new Uint8Array(chunks.reduce((acc, c) => acc + c.length, 0));
-  pos = 0;
-  for (const chunk of chunks) { raw.set(chunk, pos); pos += chunk.length; }
-
-  // Apply PNG filter reconstruction
-  const channels = colorType === 6 ? 4 : (colorType === 2 ? 3 : 4);
-  const stride = width * channels;
-  const pixels = new Uint8Array(width * height * 4);
-
-  for (let y = 0; y < height; y++) {
-    const filterType = raw[y * (stride + 1)];
-    const rowStart = y * (stride + 1) + 1;
-    const prevRowStart = (y - 1) * (stride + 1) + 1;
-
-    for (let x = 0; x < stride; x++) {
-      const rawByte = raw[rowStart + x];
-      const left = x >= channels ? raw[rowStart + x - channels] : 0;
-      const up = y > 0 ? raw[prevRowStart + x] : 0;
-      const upLeft = y > 0 && x >= channels ? raw[prevRowStart + x - channels] : 0;
-
-      let val = rawByte;
-      if (filterType === 1) val = (rawByte + left) & 0xFF;
-      else if (filterType === 2) val = (rawByte + up) & 0xFF;
-      else if (filterType === 3) val = (rawByte + Math.floor((left + up) / 2)) & 0xFF;
-      else if (filterType === 4) {
-        const p = left + up - upLeft;
-        const pa = Math.abs(p - left), pb = Math.abs(p - up), pc = Math.abs(p - upLeft);
-        val = (rawByte + (pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft)) & 0xFF;
-      }
-      raw[rowStart + x] = val;
-
-      const pixelIdx = (y * width + Math.floor(x / channels)) * 4;
-      const channel = x % channels;
-      if (channels === 4) {
-        pixels[pixelIdx + channel] = val;
-      } else {
-        pixels[pixelIdx + channel] = val;
-        if (channel === 2) pixels[pixelIdx + 3] = 255;
-      }
-    }
-  }
-
-  return { width, height, pixels };
-}
-
-// -----------------------------------------------------------
-// COMPOSITE: car original + studio background using alpha mask
-// For each pixel: alpha > 10 = car pixel (keep original), else = background pixel (use studio)
-// -----------------------------------------------------------
-async function compositeInterior(
-  originalBase64: string,      // Original photo (with background still present)
-  carNoBgBase64: string,       // Car with background removed (has alpha channel)
-  studioBase64: string         // Studio background to place behind car
-): Promise<string> {
-
-  console.log("   Decoding images for pixel compositing...");
-
-  try {
-    const [carMask, studio] = await Promise.all([
-      decodePNG(carNoBgBase64),
-      decodePNG(studioBase64),
-    ]);
-
-    // Also decode original to get correct interior pixels
-    const original = await decodePNG(originalBase64);
-
-    const { width, height } = carMask;
-    const result = new Uint8Array(width * height * 4);
-
-    // Scale studio to match car dimensions if needed
-    const scaleX = studio.width / width;
-    const scaleY = studio.height / height;
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4;
-        const alpha = carMask.pixels[idx + 3]; // Alpha from remove.bg mask
-
-        if (alpha > 10) {
-          // Car pixel — use from ORIGINAL (not the masked version, to preserve colors)
-          result[idx] = original.pixels[idx];
-          result[idx + 1] = original.pixels[idx + 1];
-          result[idx + 2] = original.pixels[idx + 2];
-          result[idx + 3] = 255;
-        } else {
-          // Background pixel — use studio
-          const sx = Math.min(Math.floor(x * scaleX), studio.width - 1);
-          const sy = Math.min(Math.floor(y * scaleY), studio.height - 1);
-          const si = (sy * studio.width + sx) * 4;
-          result[idx] = studio.pixels[si];
-          result[idx + 1] = studio.pixels[si + 1];
-          result[idx + 2] = studio.pixels[si + 2];
-          result[idx + 3] = 255;
-        }
-      }
-    }
-
-    // Encode result back to PNG base64
-    const encoded = await encodePNG(result, width, height);
-    console.log("   ✓ Pixel compositing complete");
-    return `data:image/png;base64,${encoded}`;
-
-  } catch (err) {
-    console.warn("   Pixel compositing failed, falling back to original:", err);
-    return originalBase64;
-  }
-}
-
-// -----------------------------------------------------------
-// MINIMAL PNG ENCODER
-// Encodes raw RGBA pixels back to PNG base64
-// -----------------------------------------------------------
-async function encodePNG(pixels: Uint8Array, width: number, height: number): Promise<string> {
-  const channels = 4;
-  const stride = width * channels;
-
-  // Apply no filter (type 0) for each row — simplest valid PNG
-  const raw = new Uint8Array((stride + 1) * height);
-
-  for (let y = 0; y < height; y++) {
-    raw[y * (stride + 1)] = 0; // Filter type: None
-    raw.set(pixels.slice(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
-  }
-
-  // Compress with deflate
-  const cs = new CompressionStream("deflate");
-  const writer = cs.writable.getWriter();
-  writer.write(raw);
-  writer.close();
-
-  const reader = cs.readable.getReader();
-  const chunks: Uint8Array[] = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-  }
-
-  const compressed = new Uint8Array(chunks.reduce((acc, c) => acc + c.length, 0));
-  let pos = 0;
-  for (const chunk of chunks) { compressed.set(chunk, pos); pos += chunk.length; }
-
-  // CRC32 — fixed: no reserved keyword conflict
-  const crc32 = (data: Uint8Array): number => {
-    let crc = 0xFFFFFFFF;
-    for (let i = 0; i < data.length; i++) {
-      crc ^= data[i];
-      for (let j = 0; j < 8; j++) {
-        crc = (crc & 1) ? (0xEDB88320 ^ (crc >>> 1)) : (crc >>> 1);
-      }
-    }
-    return (crc ^ 0xFFFFFFFF) >>> 0;
-  };
-
-  const writeChunk = (type: string, data: Uint8Array): Uint8Array => {
-    const typeBytes = new TextEncoder().encode(type);
-    const chunk = new Uint8Array(12 + data.length);
-    const dv = new DataView(chunk.buffer);
-    dv.setUint32(0, data.length);
-    chunk.set(typeBytes, 4);
-    chunk.set(data, 8);
-    const crcInput = new Uint8Array(4 + data.length);
-    crcInput.set(typeBytes);
-    crcInput.set(data, 4);
-    dv.setUint32(8 + data.length, crc32(crcInput));
-    return chunk;
-  };
-
-  // IHDR chunk
-  const ihdrData = new Uint8Array(13);
-  const ihdrDv = new DataView(ihdrData.buffer);
-  ihdrDv.setUint32(0, width);
-  ihdrDv.setUint32(4, height);
-  ihdrData[8] = 8;  // bit depth
-  ihdrData[9] = 6;  // color type: RGBA
-  ihdrData[10] = 0; // compression
-  ihdrData[11] = 0; // filter
-  ihdrData[12] = 0; // interlace
-
-  const signature = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
-  const ihdrChunk = writeChunk("IHDR", ihdrData);
-  const idatChunk = writeChunk("IDAT", compressed);
-  const iendChunk = writeChunk("IEND", new Uint8Array(0));
-
-  // Assemble final PNG
-  const totalSize = signature.length + ihdrChunk.length + idatChunk.length + iendChunk.length;
-  const png = new Uint8Array(totalSize);
-  pos = 0;
-  for (const part of [signature, ihdrChunk, idatChunk, iendChunk]) {
-    png.set(part, pos);
-    pos += part.length;
-  }
-
-  // Encode to base64
-  let binary = "";
-  for (let i = 0; i < png.length; i++) binary += String.fromCharCode(png[i]);
-  return btoa(binary);
-}
-
-async function fixSunArtifacts(
-  ai: GoogleGenerativeAI,
-  imageBase64: string
-): Promise<string> {
-
-  const clean = stripDataPrefix(imageBase64);
-
-  // Auto-detect mime type from base64 magic bytes
-  const header = atob(clean.slice(0, 16));
-  const mimeType = (header.charCodeAt(0) === 0x89 && header.charCodeAt(1) === 0x50)
-    ? "image/png"
-    : "image/jpeg";
-
-  const model = ai.getGenerativeModel({
-    model: MODEL_IMAGE,
-    generationConfig: {
-      temperature: 0.15,
-      topP: 0.25,
-      topK: 15,
-      candidateCount: 1,
-    },
-  });
-
-  try {
-    const response = await model.generateContent({
-      contents: [{
-        role: "user",
-        parts: [
-          {
-            text: `THIS IS A SUN ARTIFACT REMOVAL TASK ONLY.
-
-This interior car photo was taken outdoors with direct sunlight entering through windows.
-Sunlight has created uneven lighting artifacts on interior surfaces.
-Your ONLY job is to remove them. Nothing else changes.
-
-═══ HOW TO IDENTIFY SUN ARTIFACTS ═══
-
-The key test: same material, different brightness = sun artifact.
-
-Look at every material type in the image (leather seats, fabric, carpet, door panels).
-For each material, compare all areas of that same material against each other.
-
-If one area of the same material is significantly BRIGHTER, WARMER, or more WASHED-OUT
-than other areas of the exact same material — that bright area is a sun artifact.
-
-The correct reference color for that material = the darker, more neutral areas of the same material
-where direct sunlight is NOT hitting.
-
-Sun artifacts appear as:
-- A bright or warm patch on part of a seat when the rest of the same seat is darker/cooler
-- A diagonal streak of light crossing a surface
-- A washed-out bleached area on leather or fabric
-- A dark shadow stripe from a window frame cutting across a surface
-
-═══ HOW TO FIX ═══
-
-For each artifact:
-1. Find the correct tone: look at the SAME material in areas not affected by sunlight
-2. That unaffected area = the true color and brightness of that material
-3. Apply that true tone to the artifact zone
-4. Preserve all texture, stitching, quilting, grain underneath
-5. After fixing: all areas of the same material must look identical in brightness and color
-
-MATCHING RULE — this is the success criterion:
-Every area of the same material must end up at the same brightness and color tone.
-Seats of the same leather must match each other.
-Carpet on left must match carpet on right.
-No part of any surface should be notably brighter or warmer than the rest of that same surface.
-
-═══ WHAT NEVER CHANGES ═══
-❌ Crop and framing — unchanged
-❌ All interior structure — seats, panels, belts, trim — exact positions
-❌ Windows and outdoor areas — do not touch
-❌ Natural 3D shadows from seat shape/folds — these are correct depth cues, leave them
-❌ Texture, stitching, quilting — preserved underneath every correction`
-          },
-          { inlineData: { data: clean, mimeType } },
-        ]
-      }],
-    });
-
-    const imagePart = response.response.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
-    if (!imagePart?.inlineData?.data) {
-      console.warn("   ⚠ fixSunArtifacts: no output, using original");
-      return imageBase64;
-    }
-
-    console.log("   ✓ Sun artifacts removed");
-    console.log(`   [TOKENS][fixSunArtifacts] input:${response.response.usageMetadata?.promptTokenCount} output:${response.response.usageMetadata?.candidatesTokenCount} total:${response.response.usageMetadata?.totalTokenCount}`);
-    return `data:${imagePart.inlineData.mimeType || "image/jpeg"};base64,${imagePart.inlineData.data}`;
-
-  } catch (err) {
-    console.warn("   ⚠ fixSunArtifacts failed, using original:", err);
-    return imageBase64;
-  }
-}
-
-// feb 26
-
-// async function refineInterior(
-//     ai: GoogleGenerativeAI,
-//     originalBase64: string,
-//     studioBase64: string,
-//     branding?: { isEnabled?: boolean; logoUrl?: string | null }
-// ): Promise<string> {
-
-//     const cleanOriginal = stripDataPrefix(originalBase64);
-//     const cleanStudio = stripDataPrefix(studioBase64);
-
-//     const prompt = `You are a professional photo retoucher working on a car interior photograph.
-
-// ⚠️ CRITICAL — READ BEFORE ANYTHING ELSE:
-// Image 1 is an INTERIOR photograph of a car.
-// Your output must show the EXACT same view as Image 1 — same framing, same angle, same interior.
-// DO NOT generate any exterior car view.
-// DO NOT output a full car image from outside.
-// DO NOT hallucinate or invent anything not visible in Image 1.
-// Output must be a retouched version of Image 1 — nothing else.
-// If output shows exterior of car — AUTOMATIC FAILURE.
-
-// ═══════════════════════════════════════════════
-// TASK 1 — REPLACE ALL OUTDOOR ENVIRONMENT
-// ═══════════════════════════════════════════════
-
-// Scan every part of Image 1 and identify ALL areas where outdoor environment is visible.
-// Outdoor environment includes: sky, buildings, street, road, parked cars, trees, fences, people, or any exterior scene.
-
-// Outdoor can appear in any of these locations — check ALL of them:
-// - Through the windscreen (front glass)
-// - Through side windows (left side, right side)
-// - Through the rear window
-// - Through any open door or boot opening
-// - Reflected in the rear view mirror
-// - Reflected in side mirrors if visible
-// - Visible through any mesh, grille, or partition panel
-// - Any other location where outdoor is visible
-
-// For every outdoor area found, replace it with Image 2's studio environment:
-// - Match Image 2's wall/background color for upper areas
-// - Match Image 2's floor color for lower areas
-// - Apply Image 2's lighting tone at the edges where indoor meets the replaced area
-// - Blend seamlessly — no hard edges, no visible cutlines at glass frames
-
-// For reflective surfaces (rear view mirror, side mirrors):
-// - Replace the outdoor reflection with Image 2's studio environment
-// - Keep the mirror shape, frame, and mount exactly as they are
-
-// ═══════════════════════════════════════════════
-// TASK 2 — CLEAN ALL INTERIOR SURFACES
-// ═══════════════════════════════════════════════
-
-// Clean every interior surface to showroom condition:
-
-// - Leather and upholstery: remove dust, fingerprints, scuff marks, smudges. Restore premium supple appearance. Preserve all stitching and quilting patterns exactly.
-// - Hard plastics and trim: remove fingerprints and smudges. Restore finish (gloss stays gloss, matte stays matte).
-// - Carpet and floor mats: remove dirt, scuff marks, compression marks. Restore even texture.
-// - Chrome and metal elements: polish to clean highlight.
-// - Dashboard, steering wheel, centre console: remove dust and fingerprints. Do not alter any component layout or controls.
-// - Seat belts: keep exactly as-is including any coloured elements.
-// - Screens and displays: keep displayed content exactly as-is — do not alter what is shown on any screen.
-
-// Remove any text watermarks, dealer names, addresses, or overlaid text visible in Image 1.
-
-// ═══════════════════════════════════════════════
-// TASK 3 — APPLY STUDIO LIGHTING
-// ═══════════════════════════════════════════════
-
-// Study Image 2's lighting character — its colour temperature (warm/cool/neutral), brightness, and direction.
-
-// CRITICAL — REMOVE ALL OUTDOOR LIGHTING ARTIFACTS FIRST:
-
-// ⚠ THIS IMAGE HAS ALREADY BEEN PRE-PROCESSED TO REMOVE SUN ARTIFACTS.
-// DO NOT add any bright patches, directional light, or uneven lighting onto any seat surface.
-// Seats must remain exactly as they appear in Image 1 — your job is ONLY background replacement and studio lighting application.
-
-// - HARSH DIRECTIONAL SHADOWS:
-// Look for strong dark shadows cast across seats, door panels, carpet, or any surface by sunlight entering through windows — these appear as dark diagonal or horizontal stripes across surfaces.
-// Remove every shadow completely. Replace with the surface's natural even tone. No directional dark bands anywhere.
-
-// After removing both artifacts, every seat and surface must be evenly lit — uniform tone throughout, no bright patches, no dark stripes, no directional gradients from any outdoor light source.
-
-// THEN apply studio lighting:
-// - Overall brightness LOWER than Image 1 — darker, moodier, premium feel
-// - Reduce exposure by approximately 15-25% compared to Image 1
-// - Dark surfaces (black, grey) should go deeper and richer, not lighter
-// - Apply Image 2's ambient colour temperature softly across all surfaces
-// - Top surfaces catch slightly more light, recessed areas naturally darker
-// - Chrome and metal: clean single highlight streak
-
-// ⚠ CRITICAL — DO NOT RE-INTRODUCE DIRECTIONAL WINDOW LIGHT:
-// There may be a bright window or light source visible on the LEFT or RIGHT side of the frame.
-// Do NOT use this as a lighting reference for the seats.
-// Do NOT paint any bright diagonal band, streak, or gradient onto any seat surface based on window light direction.
-// Studio lighting is PERFECTLY EVEN and DIFFUSE — seats must show uniform tone, not lit from one side.
-
-// The result must feel like even diffuse studio softboxes — not sunlight through a window.
-
-// ═══════════════════════════════════════════════
-// TASK 4 — ENHANCE COLOUR AND VIBRANCY
-// ═══════════════════════════════════════════════
-
-// Make all interior materials look premium and rich:
-// - All leather/upholstery colours become richer but same tone — supple and luxurious
-// - Dark surfaces (black plastic, dark carpet) become deep and defined — not flat or grey
-// - Light surfaces (cream leather, beige headliner) become rich and warm — not blown out
-// - Overall image should feel like a luxury car brochure — dramatic, not clinical
-// - Contrast should be higher — deep darks, rich mids, controlled highlights- All colours become richer versions of themselves — no hue shifting
-// - Final image should have higher contrast overall — not flat or evenly lit
-// - Think: dark studio with focused lighting, not a bright showroom
-
-// Apply subtle micro-contrast — leather grain, stitching, carpet texture all look crisp and tactile.
-
-// ═══════════════════════════════════════════════
-// STRICT PRESERVATION RULES
-// ═══════════════════════════════════════════════
-
-// These must never change:
-
-// OUTPUT FRAMING:
-// - Output must contain the complete frame of Image 1 — same dimensions, same aspect ratio
-// - Nothing cropped — full left edge, full right edge, full top, full bottom all preserved
-// - Camera angle and perspective are identical to Image 1
-
-// INTERIOR STRUCTURE:
-// - Every component stays in its exact position — nothing moves, nothing is added, nothing is removed
-// - Dashboard layout: every vent, button, knob, trim strip — exact position and design
-// - Steering wheel: exact shape and all controls
-// - Centre console: exact shape and all controls
-// - Seats: exact position, shape, and colour
-// - All smaller elements: hooks, handles, clips, seatbelt anchors, buttons — exact position
-
-// COLOURS:
-// - Every surface colour is locked — only gets richer, never shifts to a different colour
-// - Seat colour locked (orange stays orange, cream stays cream, black stays black)
-// - Dashboard colour locked
-// - Carpet colour locked
-// - Headliner colour locked
-
-// GLASS AND FRAMES:
-// - All window frames, rubber seals, and pillars stay exactly as in Image 1
-// - Only the outdoor content through the glass changes — the frame itself does not
-
-// ═══════════════════════════════════════════════
-// OUTPUT REQUIREMENTS
-// ═══════════════════════════════════════════════
-
-// - Same framing and dimensions as Image 1
-// - All outdoor replaced with Image 2's studio environment
-// - All reflective surfaces (mirrors) show studio environment instead of outdoor
-// - Interior clean, bright, vibrant — professional studio quality
-// - Photorealistic — not CGI or illustrated
-// - No text watermarks or dealer overlays
-// ${branding?.isEnabled ? "- Place the branding logo (Image 3) in the top-left corner, small and unobtrusive" : ""}`;
-
-//     const parts: any[] = [
-//         { text: prompt },
-//         {
-//             //text: "Image 1 — Original car interior photo to be retouched:"
-//             text: "Image 1 — INTERIOR PHOTO TO RETOUCH (do not generate exterior car, only retouch this exact interior view):"
-//         },
-//         //{ inlineData: { data: cleanOriginal, mimeType: "image/jpeg" } },
-//         //{ inlineData: { data: cleanOriginal, mimeType: originalBase64.includes("image/png") ? "image/png" : "image/jpeg" } },
-//         { inlineData: { data: cleanOriginal, mimeType: cleanOriginal.slice(0, 16) && atob(cleanOriginal.slice(0, 16)).charCodeAt(0) === 0x89 ? "image/png" : "image/jpeg" } },
-//         {
-//             text: "Image 2 — Studio background. Use its environment, colours, and lighting to replace all outdoor areas in Image 1:"
-//         },
-//         { inlineData: { data: cleanStudio, mimeType: "image/jpeg" } },
-//         //{ inlineData: { data: cleanStudio, mimeType: originalBase64.includes("image/png") ? "image/png" : "image/jpeg" } },
-//     ];
-
-//     if (branding?.isEnabled && branding?.logoUrl) {
-//         parts.push(
-//             { text: "Image 3 — Branding logo to place top-left:" },
-//             { inlineData: { data: stripDataPrefix(branding.logoUrl), mimeType: "image/png" } }
-//         );
-//     }
-
-//     const model = ai.getGenerativeModel({
-//         model: MODEL_IMAGE,
-//         safetySettings: [
-//             { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-//             { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-//             { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-//             { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-//         ],
-//         generationConfig: {
-//             temperature: 0.20,
-//             topP: 0.30,
-//             topK: 20,
-//             candidateCount: 1,
-//         },
-//     });
-
-//     const response = await model.generateContent({
-//         contents: [{ role: "user", parts }],
-//     });
-
-//     const candidate = response.response.candidates?.[0];
-//     const imagePart = candidate?.content?.parts?.find((p: any) => p.inlineData);
-
-//     console.log(`   [TOKENS][refineInterior] input:${response.response.usageMetadata?.promptTokenCount} output:${response.response.usageMetadata?.candidatesTokenCount} total:${response.response.usageMetadata?.totalTokenCount}`);
-
-//     if (!imagePart?.inlineData?.data) {
-//         throw new Error(`Interior refinement failed. FinishReason: ${candidate?.finishReason || "UNKNOWN"}`);
-//     }
-
-//     const mimeType = imagePart.inlineData.mimeType || "image/png";
-//     return `data:${mimeType};base64,${imagePart.inlineData.data}`;
-// }
-
-// feb 27
-
-// async function refineInterior(
-//     ai: GoogleGenerativeAI,
-//     originalBase64: string,
-//     studioBase64: string,
-//     branding?: { isEnabled?: boolean; logoUrl?: string | null }
-// ): Promise<string> {
-
-//     const cleanOriginal = stripDataPrefix(originalBase64);
-//     const cleanStudio = stripDataPrefix(studioBase64);
-
-// //     const prompt = `You are a professional automotive photo retoucher.
-
-// // ⚠️ CRITICAL — THIS IS AN INTERIOR CAR PHOTO:
-// // Image 1 is an interior photograph of a car.
-// // Output must show the EXACT same interior view — same framing, same angle, same crop.
-// // DO NOT generate any exterior car view. DO NOT output a full car from outside.
-// // Output is a retouched version of Image 1 — nothing else.
-
-// // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// // ⛔ ZERO-TOLERANCE CHECKLIST — VERIFY BEFORE OUTPUT
-// // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-// // Before finalising the output, confirm ALL of these are true:
-
-// // ☑ REAR VIEW MIRROR — the glass contains ONLY studio environment, zero outdoor content
-// // ☑ LEFT SIDE MIRROR (if visible) — the glass contains ONLY studio environment
-// // ☑ RIGHT SIDE MIRROR (if visible) — the glass contains ONLY studio environment
-// // ☑ WINDSCREEN AREA — no white sky, no grey sky, no buildings, no outdoor light bleed
-// // ☑ ALL WINDOWS — no outdoor scene visible through any glass
-// // ☑ SUN RAYS — no bright diagonal or horizontal light streaks across any interior surface
-// // ☑ SKY GLOW — no white/grey sky brightness bleeding onto the headliner, dashboard, or seats
-// // ☑ DEALER TEXT — no overlaid address, name, or watermark text anywhere
-// // ☑ INTERIOR DARKNESS — black leather looks deep black (not grey), dark plastics look near-black
-
-// // If ANY item above is still present = output failure. Fix it before rendering.
-
-// // ═══════════════════════════════════════════════
-// // TASK 1 — ERASE ALL OUTDOOR FROM WINDOWS
-// // ═══════════════════════════════════════════════
-
-// // Scan Image 1 for every window opening — windscreen, side windows, rear window, open doors.
-// // Every pixel of sky, road, building, parked car, tree, or outdoor scene visible through glass must be replaced.
-
-// // Replacement content = Image 2's studio environment:
-// // - Sky/upper zone → Image 2's wall or background color
-// // - Lower zone → Image 2's floor color
-// // - Transition blends naturally — no hard line at the glass edge or pillar
-
-// // ⚠ The white or grey sky area visible through the windscreen is OUTDOOR. It must be fully replaced.
-// // Do not leave any white/grey/bright patch in the windscreen area — replace completely with studio.
-
-// // ═══════════════════════════════════════════════
-// // TASK 2 — OVERWRITE ALL MIRROR GLASS WITH STUDIO
-// // ═══════════════════════════════════════════════
-
-// // THIS IS MANDATORY. Every mirror in the image must be updated. No exceptions.
-
-// // STEP 1 — LOCATE EVERY MIRROR:
-// // - Rear view mirror: mounted at top of windscreen or on ceiling — typically a rectangular mirror facing the driver. In this camera angle it appears near the top-centre of the frame.
-// // - Right door mirror / wing mirror: visible on the right side of the frame through the passenger window or A-pillar area — a small convex mirror in a housing.
-// // - Left door mirror / wing mirror: visible on the left edge of the frame if the camera angle shows it.
-// // - Any other reflective mirror surfaces present.
-
-// // STEP 2 — FOR EACH MIRROR GLASS, DO THIS:
-// // The mirror glass currently shows outdoor content (buildings, cars, road, sky, parking lot).
-// // You must PAINT OVER the entire mirror glass area with Image 2's studio environment.
-// // - Fill the mirror glass with a natural-looking studio reflection: upper portion = Image 2's wall/ceiling tone, lower portion = Image 2's floor tone
-// // - The fill must look like a genuine mirror reflection of a studio — not a flat color block
-// // - Subtle depth and gradient within the mirror glass — darker corners, slightly lighter centre
-// // - Match Image 2's color temperature inside the mirror glass
-
-// // STEP 3 — MIRROR FRAME AND HOUSING:
-// // - Keep the physical mirror frame, stem, mounting bracket, and housing exactly as-is
-// // - Only the glass reflection content changes — nothing else on the mirror moves or changes shape
-
-// // ⚠ ENFORCEMENT: After completing Task 2, zoom into each mirror in your internal render.
-// // If you can see a building, a car, a road, a sky, or any outdoor content in any mirror glass — redo it.
-// // The output is only acceptable when every mirror glass shows studio environment exclusively.
-
-// // ═══════════════════════════════════════════════
-// // TASK 3 — ELIMINATE ALL SUN RAY ARTIFACTS
-// // ═══════════════════════════════════════════════
-
-// // Sun rays, sunlight streaks, and sky-glow are present in Image 1. Remove all of them.
-
-// // WHAT TO LOOK FOR AND REMOVE:
-// // - Bright diagonal or horizontal light bands crossing seats, dashboard, or door panels
-// // - Warm orange/yellow sun patches on leather or fabric surfaces
-// // - Harsh bright zone on the headliner from sky light coming through windscreen
-// // - White/bright overexposed glow on the dashboard top surface from window light
-// // - Any area where one part of a surface is significantly brighter than the same material elsewhere
-
-// // HOW TO REMOVE:
-// // For each artifact:
-// // 1. Find the same material in a nearby area NOT affected by sunlight — that is the correct reference tone
-// // 2. Paint over the artifact zone with the correct reference tone for that material
-// // 3. Preserve all texture, grain, stitching underneath — only the brightness/color cast changes
-// // 4. After fix: the entire material surface must be uniform — no patch should stand out as brighter or warmer
-
-// // SUCCESS CRITERION: Every seat, every panel, every surface shows even uniform tone throughout.
-// // No patch anywhere should be noticeably brighter, warmer, or more washed-out than its surroundings.
-
-// // ═══════════════════════════════════════════════
-// // TASK 4 — DARKEN AND ENRICH THE INTERIOR
-// // ═══════════════════════════════════════════════
-
-// // ⚠ CRITICAL WARNING — READ BEFORE APPLYING:
-// // Image 2's studio background is a PLAIN WHITE WALL. This is just the background environment.
-// // DO NOT use the background brightness as a reference for the interior lighting.
-// // The interior of the car must be significantly DARKER than that white background.
-// // The white background behind the car does NOT mean the car interior should be bright.
-// // Ignore the background brightness entirely when deciding how dark to make the interior.
-
-// // TARGET LOOK: The interior must look like it was photographed inside a dark professional studio
-// // with controlled softbox lighting — not outdoors, not in a bright showroom.
-// // Think luxury car brochure — moody, deep, rich. Not bright, not flat, not washed out.
-
-// // EXPOSURE — BE AGGRESSIVE:
-// // - The current Image 1 interior is OVEREXPOSED from outdoor light. It looks washed out.
-// // - You must correct this heavily. Reduce overall interior brightness by 35-45%.
-// // - This is a strong correction — the interior in Image 1 is much too bright.
-// // - After correction: black leather should look deep true black, not grey
-// // - After correction: dark plastics should look nearly black, not mid-grey
-// // - After correction: the dashboard should look dark and moody, not light grey
-// // - Shadows under seats, in recesses, in door pockets: fully deep black
-// // - Only the very tops of surfaces catch any highlight — everything else stays dark
-
-// // COLORS — MAKE THEM RICH AND SATURATED:
-// // - Every surface color becomes a richer, more saturated version of itself
-// // - Black leather: deep, lustrous true black with subtle sheen — not grey, not flat
-// // - Dark grey plastics: deep charcoal, not washed-out mid-grey
-// // - Any brown/tan tones: rich warm depth, not beige or faded
-// // - Chrome and metal: clean sharp highlight against dark surroundings
-// // - No hue shifting — same color family, just richer and deeper
-
-// // CONTRAST — HIGH AND DRAMATIC:
-// // - Shadows: crush them deep — recesses and under-surfaces go to near-black
-// // - Midtones: rich and defined — material texture fully visible
-// // - Highlights: tight and controlled — only small bright points on chrome and top edges
-// // - The difference between the darkest and lightest areas must be large
-// // - Result: dramatic, three-dimensional, luxury feel
-
-// // VIBRANCY:
-// // - Increase color saturation noticeably across all surfaces
-// // - Leather grain, stitching lines, carpet weave all look sharp and tactile
-// // - Every material looks premium — not flat, not clinical, not overlit
-
-// // SUCCESS CHECK — before finalising Task 4:
-// // Is the black leather actually deep black (not grey)? → If still grey, darken more.
-// // Are the dark plastics near-black (not mid-grey)? → If still mid-grey, darken more.
-// // Does the overall interior feel moody and premium? → If still looks bright/flat, darken more.
-
-// // ═══════════════════════════════════════════════
-// // TASK 5 — APPLY STUDIO AMBIENT TONE
-// // ═══════════════════════════════════════════════
-
-// // ⚠ The studio background (Image 2) may be plain white — do NOT copy its brightness onto the interior.
-// // Only take its COLOR TEMPERATURE (warm/cool/neutral) — not its exposure level.
-
-// // Apply Image 2's ambient color temperature very softly across all interior surfaces:
-// // - If Image 2 is neutral/cool white: apply a subtle cool-neutral cast — clean and crisp
-// // - If Image 2 is warm: apply a very subtle warm undertone to leather and soft surfaces
-// // - Chrome and metal: clean single narrow highlight streak
-// // - Top surfaces catch slightly more light, deep recesses stay dark
-// // - The color temperature tint should be subtle — the main effect is from Task 4's darkening
-
-// // ═══════════════════════════════════════════════
-// // STRICT PRESERVATION RULES — NEVER CHANGE THESE
-// // ═══════════════════════════════════════════════
-
-// // ❌ Output framing — same dimensions, same crop, same angle as Image 1
-// // ❌ Every interior component — exact position, nothing moves, nothing added, nothing removed
-// // ❌ Dashboard, steering wheel, centre console — exact layout
-// // ❌ All surface colors — only get richer, never shift hue
-// // ❌ Window frames, rubber seals, pillars — unchanged
-// // ❌ Screens and displays — keep displayed content exactly as-is
-// // ❌ Dealer text, watermarks, address overlays — remove all of them
-
-// // OUTPUT REQUIREMENTS:
-// // - Same framing and dimensions as Image 1
-// // - All outdoor replaced with Image 2's studio environment
-// // - Every mirror glass shows studio reflection only — no outdoor
-// // - No sun rays or sky glow anywhere on interior surfaces
-// // - Interior dramatically darker and richer — black leather = true deep black, not grey
-// // - High contrast, moody, luxury brochure quality — NOT bright or flat
-// // - Photorealistic — not CGI`;
-
-// const prompt = `You are a professional automotive photo retoucher.
-
-// ⚠️ CRITICAL — THIS IS AN INTERIOR CAR PHOTO:
-// Image 1 is an interior photograph of a car.
-// Output must show the EXACT same interior view — same framing, same angle, same crop.
-// DO NOT generate any exterior car view. DO NOT output a full car from outside.
-// Output is a retouched version of Image 1 — nothing else.
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 🔒 COLOR LOCK — ABSOLUTE RULE #1 — READ FIRST
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-// Scan Image 1 NOW and identify the EXACT color of every interior surface:
-// - Seat upholstery color (beige? cream? tan? black? grey? brown? red?)
-// - Door panel color
-// - Dashboard color
-// - Carpet color
-// - Headliner color
-
-// These colors are LOCKED. They must appear IDENTICAL in the output.
-// ❌ DO NOT darken seats to make them look black if they are beige/tan/cream
-// ❌ DO NOT shift seat color toward darker tones — lighter colors stay light
-// ❌ DO NOT use any reference image or style assumption about what car interiors look like
-// ❌ If seats are BEIGE in Image 1 — they must be BEIGE in the output. Not dark beige. Not grey-beige. BEIGE.
-// ❌ If seats are CREAM — they stay cream. If TAN — they stay tan. If BLACK — they stay black.
-
-// The only things that change are: background through windows, mirror reflections, sun artifact removal, and overall ambient lighting tone.
-// Surface COLORS do not change. Surface BRIGHTNESS changes only minimally — enough to match studio mood but never enough to shift the perceived color.
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ⛔ ZERO-TOLERANCE CHECKLIST — VERIFY BEFORE OUTPUT
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-// Before finalising the output, confirm ALL of these are true:
-
-// ☑ SEAT COLOR — seats are the exact same color as in Image 1 (beige stays beige, black stays black)
-// ☑ REAR VIEW MIRROR — the glass contains ONLY studio environment, zero outdoor content
-// ☑ LEFT SIDE MIRROR (if visible) — the glass contains ONLY studio environment
-// ☑ RIGHT SIDE MIRROR (if visible) — the glass contains ONLY studio environment
-// ☑ WINDSCREEN AREA — no white sky, no grey sky, no buildings, no outdoor light bleed
-// ☑ ALL WINDOWS — no outdoor scene visible through any glass
-// ☑ SUN RAYS — no bright diagonal or horizontal light streaks across any interior surface
-// ☑ SKY GLOW — no white/grey sky brightness bleeding onto the headliner, dashboard, or seats
-// ☑ DEALER TEXT — no overlaid address, name, or watermark text anywhere
-
-// If ANY item above is still present = output failure. Fix it before rendering.
-
-// ═══════════════════════════════════════════════
-// TASK 1 — ERASE ALL OUTDOOR FROM WINDOWS
-// ═══════════════════════════════════════════════
-
-// Scan Image 1 for every window opening — windscreen, side windows, rear window, open doors.
-// Every pixel of sky, road, building, parked car, tree, or outdoor scene visible through glass must be replaced.
-
-// Replacement content = Image 2's studio environment:
-// - Sky/upper zone → Image 2's wall or background color
-// - Lower zone → Image 2's floor color
-// - Transition blends naturally — no hard line at the glass edge or pillar
-
-// ⚠ The white or grey sky area visible through the windscreen is OUTDOOR. It must be fully replaced.
-// Do not leave any white/grey/bright patch in the windscreen area — replace completely with studio.
-
-// ═══════════════════════════════════════════════
-// TASK 2 — OVERWRITE ALL MIRROR GLASS WITH STUDIO
-// ═══════════════════════════════════════════════
-
-// THIS IS MANDATORY. Every mirror in the image must be updated. No exceptions.
-
-// STEP 1 — LOCATE EVERY MIRROR:
-// - Rear view mirror: mounted at top of windscreen or on ceiling — typically a rectangular mirror facing the driver. In this camera angle it appears near the top-centre of the frame.
-// - Right door mirror / wing mirror: visible on the right side of the frame through the passenger window or A-pillar area — a small convex mirror in a housing.
-// - Left door mirror / wing mirror: visible on the left edge of the frame if the camera angle shows it.
-// - Any other reflective mirror surfaces present.
-
-// STEP 2 — FOR EACH MIRROR GLASS, DO THIS:
-// The mirror glass currently shows outdoor content (buildings, cars, road, sky, parking lot).
-// You must PAINT OVER the entire mirror glass area with Image 2's studio environment.
-// - Fill the mirror glass with a natural-looking studio reflection: upper portion = Image 2's wall/ceiling tone, lower portion = Image 2's floor tone
-// - The fill must look like a genuine mirror reflection of a studio — not a flat color block
-// - Subtle depth and gradient within the mirror glass — darker corners, slightly lighter centre
-// - Match Image 2's color temperature inside the mirror glass
-
-// STEP 3 — MIRROR FRAME AND HOUSING:
-// - Keep the physical mirror frame, stem, mounting bracket, and housing exactly as-is
-// - Only the glass reflection content changes — nothing else on the mirror moves or changes shape
-
-// ⚠ ENFORCEMENT: After completing Task 2, zoom into each mirror in your internal render.
-// If you can see a building, a car, a road, a sky, or any outdoor content in any mirror glass — redo it.
-// The output is only acceptable when every mirror glass shows studio environment exclusively.
-
-// ═══════════════════════════════════════════════
-// TASK 3 — ELIMINATE ALL SUN RAY ARTIFACTS
-// ═══════════════════════════════════════════════
-
-// Sun rays, sunlight streaks, and sky-glow are present in Image 1. Remove all of them.
-
-// WHAT TO LOOK FOR AND REMOVE:
-// - Bright diagonal or horizontal light bands crossing seats, dashboard, or door panels
-// - Warm orange/yellow sun patches on leather or fabric surfaces
-// - Harsh bright zone on the headliner from sky light coming through windscreen
-// - White/bright overexposed glow on the dashboard top surface from window light
-// - Any area where one part of a surface is significantly brighter than the same material elsewhere
-
-// HOW TO REMOVE:
-// For each artifact:
-// 1. Find the same material in a nearby area NOT affected by sunlight — that is the correct reference tone
-// 2. Paint over the artifact zone with the correct reference tone for that material
-// 3. Preserve all texture, grain, stitching underneath — only the brightness/color cast changes
-// 4. After fix: the entire material surface must be uniform — no patch should stand out as brighter or warmer
-
-// SUCCESS CRITERION: Every seat, every panel, every surface shows even uniform tone throughout.
-// No patch anywhere should be noticeably brighter, warmer, or more washed-out than its surroundings.
-
-// ═══════════════════════════════════════════════
-// TASK 4 — ENHANCE LIGHTING QUALITY (COLOR-SAFE)
-// ═══════════════════════════════════════════════
-
-// ⚠ CRITICAL — COLOR PRESERVATION IS MANDATORY:
-// Before doing anything in this task, re-read the COLOR LOCK section above.
-// You must NOT shift any surface color. Darkening is ONLY allowed if it does not
-// visually change the perceived color of the material.
-
-// PERMITTED adjustments:
-// - Reduce overall exposure by a MAX of 15% — subtle, not dramatic
-// - Add depth and micro-contrast so textures (stitching, quilting, grain) look crisper
-// - Make shadows in recesses and under-seat areas slightly deeper
-// - Make highlights on raised surfaces slightly brighter
-
-// NOT PERMITTED:
-// ❌ Darkening beige/cream/tan/light-colored seats until they look grey or dark
-// ❌ Shifting any surface toward black, dark grey, or any darker hue
-// ❌ Aggressive exposure reduction — this is NOT a dark-studio editorial shoot
-// ❌ Making light interiors look dark — keep light interiors LIGHT
-// ❌ Using Image 2's color palette or tone as a reference for seat color
-
-// LIGHT-COLORED INTERIORS (beige, cream, tan, ivory, champagne, light grey):
-// - Seats must remain clearly light-toned in the output
-// - Enhance richness by boosting leather texture and stitching contrast only
-// - A slight warm-neutral tone from studio ambient is fine — but seats stay light
-// - The quilting pattern and grain should look crisper and more defined
-// - Overall brightness reduction: MAX 10% — barely perceptible
-
-// DARK-COLORED INTERIORS (black, dark grey, dark navy, dark brown):
-// - Seats can go richer and deeper — but same hue, not a different color
-// - Black leather: deeper and more lustrous
-// - Shadows in recesses: fully dark
-// - Overall brightness reduction: up to 20% is acceptable
-
-// FOR ALL INTERIORS:
-// - Chrome and metal accents: clean sharp highlight
-// - Micro-contrast: leather grain, stitching, carpet weave all look crisp and tactile
-// - Overall feel: premium and well-lit, not flat — but color-accurate above all else
-
-// SUCCESS CHECK — before finalising Task 4:
-// Are the seats the SAME color as in Image 1? → If beige in Image 1, must still look clearly beige. If changed → FAIL.
-// Does the interior feel slightly richer without a color shift? → If yes → PASS.
-
-// ═══════════════════════════════════════════════
-// TASK 5 — APPLY STUDIO AMBIENT TONE
-// ═══════════════════════════════════════════════
-
-// ⚠ The studio background (Image 2) may be plain white — do NOT copy its brightness onto the interior.
-// Only take its COLOR TEMPERATURE (warm/cool/neutral) — not its exposure level.
-// ⚠ ALSO: Do NOT copy Image 2's seat color onto Image 1's seats. Image 2 may have black seats — this is irrelevant. Image 1's seat color is locked from the COLOR LOCK section above.
-
-// Apply Image 2's ambient color temperature very softly across all interior surfaces:
-// - If Image 2 is neutral/cool white: apply a subtle cool-neutral cast — clean and crisp
-// - If Image 2 is warm: apply a very subtle warm undertone to leather and soft surfaces
-// - Chrome and metal: clean single narrow highlight streak
-// - Top surfaces catch slightly more light, deep recesses stay dark
-// - The color temperature tint should be subtle — the main effect is from Task 4
-
-// ═══════════════════════════════════════════════
-// STRICT PRESERVATION RULES — NEVER CHANGE THESE
-// ═══════════════════════════════════════════════
-
-// ❌ Output framing — same dimensions, same crop, same angle as Image 1
-// ❌ Every interior component — exact position, nothing moves, nothing added, nothing removed
-// ❌ Dashboard, steering wheel, centre console — exact layout
-// ❌ All surface colors — only get richer, never shift hue, never shift toward darker tone
-// ❌ Window frames, rubber seals, pillars — unchanged
-// ❌ Screens and displays — keep displayed content exactly as-is
-// ❌ Dealer text, watermarks, address overlays — remove all of them
-
-// OUTPUT REQUIREMENTS:
-// - Same framing and dimensions as Image 1
-// - All outdoor replaced with Image 2's studio environment
-// - Every mirror glass shows studio reflection only — no outdoor
-// - No sun rays or sky glow anywhere on interior surfaces
-// - Seat colors identical to Image 1 — only lighting quality improved, not color
-// - Premium studio quality — rich textures, crisp details, accurate colors
-// - Photorealistic — not CGI
-// ${branding?.isEnabled ? "- Place the branding logo (Image 3) in the top-left corner, small and unobtrusive" : ""}`;
-
-//     const parts: any[] = [
-//         { text: prompt },
-//         {
-//             text: "Image 1 — INTERIOR PHOTO TO RETOUCH (retouch this exact interior view, do not generate exterior car):"
-//         },
-//         {
-//             inlineData: {
-//                 data: cleanOriginal,
-//                 mimeType: cleanOriginal.slice(0, 16) && atob(cleanOriginal.slice(0, 16)).charCodeAt(0) === 0x89
-//                     ? "image/png"
-//                     : "image/jpeg"
-//             }
-//         },
-//         {
-//             text: "Image 2 — STUDIO ENVIRONMENT (replace all outdoor areas in Image 1 with this environment, and match its ambient color temperature):"
-//         },
-//         { inlineData: { data: cleanStudio, mimeType: "image/jpeg" } },
-//     ];
-
-//     if (branding?.isEnabled && branding?.logoUrl) {
-//         parts.push(
-//             { text: "Image 3 — Branding logo to place top-left:" },
-//             { inlineData: { data: stripDataPrefix(branding.logoUrl), mimeType: "image/png" } }
-//         );
-//     }
-
-//     const model = ai.getGenerativeModel({
-//         model: MODEL_IMAGE,
-//         safetySettings: [
-//             { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-//             { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-//             { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-//             { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-//         ],
-//         generationConfig: {
-//             temperature: 0.20,
-//             topP: 0.30,
-//             topK: 20,
-//             candidateCount: 1,
-//         },
-//     });
-
-//     const response = await model.generateContent({
-//         contents: [{ role: "user", parts }],
-//     });
-
-//     const candidate = response.response.candidates?.[0];
-//     const imagePart = candidate?.content?.parts?.find((p: any) => p.inlineData);
-
-//     console.log(`   [TOKENS][refineInterior] input:${response.response.usageMetadata?.promptTokenCount} output:${response.response.usageMetadata?.candidatesTokenCount} total:${response.response.usageMetadata?.totalTokenCount}`);
-
-//     if (!imagePart?.inlineData?.data) {
-//         throw new Error(`Interior refinement failed. FinishReason: ${candidate?.finishReason || "UNKNOWN"}`);
-//     }
-
-//     const mimeType = imagePart.inlineData.mimeType || "image/png";
-//     return `data:${mimeType};base64,${imagePart.inlineData.data}`;
-// }
-
-async function refineInterior(
-  ai: GoogleGenerativeAI,
-  originalBase64: string,
-  studioBase64: string,
-  branding?: { isEnabled?: boolean; logoUrl?: string | null }
-): Promise<string> {
-
-  const cleanStudio = stripDataPrefix(studioBase64);
-
-  // ─────────────────────────────────────────────────
-  // CALL 1 — BACKGROUND & WINDOW REPLACEMENT ONLY
-  // Single focused job: replace outdoor through glass.
-  // No lighting changes, no color work, nothing else.
-  // ─────────────────────────────────────────────────
-  console.log("   [refineInterior] Step 1: Background replacement...");
-
-  const promptStep1 = `You are a photo compositor. Your ONLY job in this task is background replacement.
-
-⚠️ THIS IS AN INTERIOR CAR PHOTO. Output must show the exact same interior view.
-DO NOT generate any exterior car view. DO NOT output a full car from outside.
-
-🔒 COLOR LOCK — NON-NEGOTIABLE:
-Scan Image 1 and identify every surface color right now.
-Seat color, door panel color, carpet color — ALL LOCKED.
-❌ DO NOT change any interior surface color whatsoever
-❌ DO NOT darken, shift, or recolor any seat or panel
-❌ Interior lighting stays identical to Image 1 — do not touch it
-
-YOUR ONLY JOB — REPLACE OUTDOOR WITH STUDIO:
-
-Step 1 — Find every location where outdoor is visible:
-- Through ALL windows (left, right, rear, front)
-- Through the mesh/grille partition at the top rear
-- Any gap, opening, or transparent surface showing outdoor
-
-Step 2 — For each outdoor area:
-- Replace it completely with Image 2's studio environment
-- Upper zone → Image 2's wall/background color
-- Lower zone → Image 2's floor color  
-- Blend naturally at glass edges — no hard cutlines
-- The mesh/grille partition: fill the spaces between the mesh wires with studio background, keeping the mesh wires themselves intact
-
-Step 3 — Sun ray removal:
-- Look for bright patches or light streaks on the seats or panels caused by sunlight through windows
-- For each bright patch: sample the same material in an unaffected area nearby → paint the correct tone over the bright patch
-- Preserve all texture and stitching underneath
-- After fix: every area of the same material must be uniform in brightness
-
-WHAT NEVER CHANGES:
-❌ Framing — exact same crop, angle, dimensions as Image 1
-❌ Every interior surface color — unchanged
-❌ Every interior component position — unchanged  
-❌ Interior lighting character — unchanged
-❌ Seat belt colors (red buckles stay red)
-❌ All hardware, trim, buttons — unchanged`;
-
-  const cleanOriginal1 = stripDataPrefix(originalBase64);
-  const mimeType1 = atob(cleanOriginal1.slice(0, 16)).charCodeAt(0) === 0x89 ? "image/png" : "image/jpeg";
-
-  const parts1: any[] = [
-    { text: promptStep1 },
-    { text: "Image 1 — INTERIOR PHOTO (replace outdoor through windows only, change nothing else):" },
-    { inlineData: { data: cleanOriginal1, mimeType: mimeType1 } },
-    { text: "Image 2 — STUDIO ENVIRONMENT to fill all outdoor areas:" },
-    { inlineData: { data: cleanStudio, mimeType: "image/jpeg" } },
-  ];
-
-  const model = ai.getGenerativeModel({
-    model: MODEL_IMAGE,
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-    ],
-    generationConfig: {
-      temperature: 0.10,
-      topP: 0.20,
-      topK: 10,
-      candidateCount: 1,
-    },
-  });
-
-  const response1 = await withRetry(
-    () => model.generateContent({ contents: [{ role: "user", parts: parts1 }] }),
-    "refineInterior-step1"
-  );
-
-  const candidate1 = response1.response.candidates?.[0];
-  const imagePart1 = candidate1?.content?.parts?.find((p: any) => p.inlineData);
-  console.log(`   [TOKENS][refineInterior-step1] input:${response1.response.usageMetadata?.promptTokenCount} output:${response1.response.usageMetadata?.candidatesTokenCount} total:${response1.response.usageMetadata?.totalTokenCount}`);
-
-  if (!imagePart1?.inlineData?.data) {
-    throw new Error(`Interior step 1 failed. FinishReason: ${candidate1?.finishReason || "UNKNOWN"}`);
-  }
-
-  const step1Result = `data:${imagePart1.inlineData.mimeType || "image/png"};base64,${imagePart1.inlineData.data}`;
-  console.log("   [refineInterior] Step 1 complete.");
-
-  // ─────────────────────────────────────────────────
-  // CALL 2 — LIGHTING ENHANCEMENT ONLY
-  // Input is the already-composited result from Call 1.
-  // Background is already studio. Now just enhance quality.
-  // ─────────────────────────────────────────────────
-  console.log("   [refineInterior] Step 2: Lighting enhancement...");
-
-  const promptStep2 = `You are a professional automotive photo retoucher specialising in interior enhancement.
-
-⚠️ THIS IS AN INTERIOR CAR PHOTO. Output must show the exact same interior view.
-DO NOT generate any exterior car view. DO NOT output a full car from outside.
-
-🔒 COLOR LOCK — NON-NEGOTIABLE:
-Identify the exact seat color in Image 1 right now.
-If seats are BEIGE → output must show BEIGE seats.
-If seats are TAN → output must show TAN seats.
-If seats are CREAM → output must show CREAM seats.
-If seats are BLACK → output must show BLACK seats.
-❌ ZERO tolerance for color shifting — same color in, same color out
-
-THE BACKGROUND IS ALREADY REPLACED in Image 1. Do not touch windows or background.
-
-YOUR ONLY JOB — ENHANCE LIGHTING QUALITY:
-
-For LIGHT-COLORED interiors (beige, cream, tan, ivory):
-- Seats stay clearly light — do NOT darken them
-- Add micro-contrast: make stitching, quilting pattern, leather grain look crisper
-- Subtle brightness reduction: MAX 8% — barely perceptible
-- Boost leather richness without changing the color
-- Chrome and metal hardware: clean sharp highlight
-
-For DARK-COLORED interiors (black, grey, dark brown):
-- Deepen shadows in recesses and under-seat areas
-- Make leather look more lustrous and rich
-- Brightness reduction: up to 18% acceptable
-- Chrome and metal hardware: clean sharp highlight
-
-For ALL interiors:
-- Increase micro-contrast so textures look tactile and premium
-- Leather grain, stitching lines, quilting pattern all look crisp and defined
-- Overall feel: premium studio quality — rich, not flat
-
-WHAT NEVER CHANGES:
-❌ Seat color — same perceived color as Image 1
-❌ Framing and crop — identical
-❌ Every component position — unchanged
-❌ Windows and background — already done, do not touch
-❌ Seat belt colors (red buckles stay red)
-${branding?.isEnabled ? "\nBRANDING: Place the logo (Image 3) in the top-left corner, small and unobtrusive." : ""}`;
-
-  const cleanStep1 = stripDataPrefix(step1Result);
-  const mimeType2 = atob(cleanStep1.slice(0, 16)).charCodeAt(0) === 0x89 ? "image/png" : "image/jpeg";
-
-  const parts2: any[] = [
-    { text: promptStep2 },
-    { text: "Image 1 — COMPOSITED INTERIOR (background already replaced, enhance lighting only):" },
-    { inlineData: { data: cleanStep1, mimeType: mimeType2 } },
-  ];
-
-  if (branding?.isEnabled && branding?.logoUrl) {
-    parts2.push(
-      { text: "Image 3 — Branding logo to place top-left:" },
-      { inlineData: { data: stripDataPrefix(branding.logoUrl), mimeType: "image/png" } }
-    );
-  }
-
-  const model2 = ai.getGenerativeModel({
-    model: MODEL_IMAGE,
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-    ],
-    generationConfig: {
-      temperature: 0.15,
-      topP: 0.25,
-      topK: 15,
-      candidateCount: 1,
-    },
-  });
-
-  const response2: any = await withRetry(
-    () => model2.generateContent({ contents: [{ role: "user", parts: parts2 }] }),
-    "refineInterior-step2"
-  );
-
-  const candidate2 = response2.response.candidates?.[0];
-  const imagePart2 = candidate2?.content?.parts?.find((p: any) => p.inlineData);
-  console.log(`   [TOKENS][refineInterior-step2] input:${response2.response.usageMetadata?.promptTokenCount} output:${response2.response.usageMetadata?.candidatesTokenCount} total:${response2.response.usageMetadata?.totalTokenCount}`);
-
-  if (!imagePart2?.inlineData?.data) {
-    // Step 2 failed — return step 1 result rather than throwing
-    console.warn("   [refineInterior] Step 2 failed, returning Step 1 result");
-    return step1Result;
-  }
-
-  console.log("   [refineInterior] Step 2 complete.");
-  const finalMime = imagePart2.inlineData.mimeType || "image/png";
-  return `data:${finalMime};base64,${imagePart2.inlineData.data}`;
-}
-
-// -----------------------------------------------------------
-// DETAIL EXTERIOR REFINEMENT
-// Close-ups: rims, tyres, badges, headlights, body panels etc.
-// NO background removal — works with original image directly.
-// -----------------------------------------------------------
-async function refineDetailExterior(
-  ai: GoogleGenerativeAI,
-  carImage: string,
-  studioImage: string,
-  angle: string,
-  branding?: { isEnabled?: boolean; logoUrl?: string | null }
-): Promise<string> {
-
-  const prompt = `You are an automotive studio compositor.
-
-⚠⚠⚠ PRIMARY TASK — READ FIRST ⚠⚠⚠
-Image 1 contains a car component on a TRANSPARENT background.
-Your job is to place this car component into the studio environment from Image 2.
-The car component IS the subject — it must appear in the output exactly as it appears in Image 1.
-❌ The car must NOT disappear, shrink, or be removed from the output
-❌ DO NOT alter or change any detail of the original car in image 1 like logo or brand or any fine details on tires or any surface of the car.
-❌ DO NOT output just the background — the car component must be fully visible
-
-⚠⚠⚠ FRAMING RULE ⚠⚠⚠
-The car component must appear at the SAME SIZE and POSITION as in Image 1.
-❌ DO NOT zoom out to show more of the car
-❌ DO NOT zoom in
-❌ DO NOT reframe or recompose
-❌ DO NOT generate a full car — only what is visible in Image 1
-The car fills most of the frame in Image 1 — keep it that way in the output.
-
-═══ ABSOLUTE RULE — PAINT COLOR IS LOCKED ═══
-The car's paint color must remain EXACTLY the same hue and saturation as Image 1.
-❌ DO NOT desaturate, grey out, or shift the paint color in any way
-The base paint color in the output must be visually identical to Image 1.
-Studio reflections may appear ON the paint surface but the base color underneath stays unchanged.
-
-═══ TASK 1 — REMOVE ALL ORIGINAL ENVIRONMENT REFLECTIONS ═══
-Strip every reflection and lighting artifact that belongs to the original shooting location.
-
-This includes ANY of the following that may be present:
-- Bright spots or hotspots from any light source (round, oval, rectangular, or any shape)
-- Linear streaks from fluorescent or LED strip lighting
-- Warm color bleed from floors, walls, or surroundings
-- Color casts from walls, banners, or any location-specific surfaces
-- Window light patches or daylight streaks
-
-After removal, every painted surface must show ONLY:
-- Smooth clean gloss following the natural body contour
-- No shapes, no spots, no streaks from the original shooting environment
-- Paint color fully intact and unchanged
-
-═══ TASK 2 — APPLY REFLECTIONS FROM IMAGE 2's STUDIO ═══
-Study Image 2 carefully — note its light source color, direction, brightness, wall tone, floor color.
-Apply Image 2's environment onto ALL painted, chrome, and glass surfaces:
-- Smooth highlight streak matching Image 2's light source color and direction
-- Gentle ambient gradient across each panel matching Image 2's ambient tone
-- Subtle floor bounce at the lowest visible edge from Image 2's floor color
-- Chrome and trim: clean highlight from Image 2's light source
-- Glass surfaces: faint reflection of Image 2's ceiling or upper environment
-- The lighting direction and color temperature on the car must match Image 2 exactly
-
-═══ TASK 3 — PLACE CAR INTO IMAGE 2's STUDIO ═══
-The car component must look like it was physically photographed inside Image 2's studio.
-- Extend Image 2's floor naturally and seamlessly beneath the car's lower edge
-- Add a soft natural shadow where the car meets the studio floor — consistent with Image 2's lighting
-- If Image 2's floor is reflective — add a subtle floor reflection of the car's lower portion
-- The walls and background of Image 2 must appear naturally behind the car
-- Blend the car's edges into the studio environment — no hard cutout lines, no halos, no artifacts
-- Match the car's overall color temperature to Image 2's environment
-
-═══ WHAT MUST NEVER CHANGE ═══
-❌ The car component must be fully visible and prominent — same size and position as Image 1
-❌ Paint base color — unchanged
-❌ Component geometry — shape and proportions unchanged
-❌ Badges, trim, lenses, markings, wear — all identical to Image 1
-❌ Do not repair or alter any surface detail
-❌ Camera angle and framing — locked from Image 1
-
-═══ OUTPUT SPECIFICATION ═══
-The car component from Image 1 is the main subject and must fill the frame similarly to Image 1.
-The result must feel like a single professional studio photograph — not a composite.
-${branding?.isEnabled ? "- Place the branding logo (Image 3) in the top-left corner, small and unobtrusive. Preserve the logo exactly as-is — same colors, same shape. Do not add, change, or fill any background behind it." : ""}`;
-
-  return generateImage(ai, carImage, studioImage, branding, prompt, true);
-}
-
-async function refineDetailExteriorV2(
-  ai: GoogleGenerativeAI,
-  compositedData: string,
-  branding?: { isEnabled?: boolean; logoUrl?: string | null }
-): Promise<string> {
-
-  let carImage: string;
-  let studioImg: string;
-
-  try {
-    const data = JSON.parse(compositedData);
-    carImage = data.car;
-    studioImg = data.background;
-  } catch {
-    carImage = compositedData;
-    studioImg = "";
-  }
-
-  const cleanCar = stripDataPrefix(carImage);
-  const cleanStudio = stripDataPrefix(studioImg);
-
-  const prompt = `You are an automotive studio compositor specialising in close-up exterior detail shots.
-
-═══ FRAMING LOCK — ABSOLUTE RULE #1 ═══
-Image 1 is a tight close-up crop. Output MUST match exact same crop and zoom as Image 1.
-❌ DO NOT zoom out
-❌ DO NOT show more of the car than visible in Image 1
-❌ DO NOT reframe or recompose
-If output shows more car than Image 1 — AUTOMATIC FAILURE.
-
-═══ YOUR JOB ═══
-1. Replace the background behind the component with Image 2's studio environment
-2. Remove all original environment reflections from the component's surfaces
-3. Apply studio-accurate reflections from Image 2's lighting
-
-═══ BACKGROUND REPLACEMENT ═══
-- Replace everything that is NOT the car component with Image 2's environment
-- Blend edges naturally — no hard cutout lines
-- Match ambient color temperature to Image 2
-
-═══ REFLECTION UPDATE ═══
-REMOVE from all surfaces:
-- Sky, trees, buildings, outdoor shapes
-- Indoor ceiling lights, fluorescent strips, dealership walls
-- Warm orange/amber floor glow
-- Any shape from original shooting location
-
-APPLY from Image 2 environment:
-- Highlight streaks matching Image 2's light source
-- Smooth gradients in Image 2's ambient tone
-- Keep paint color 100% unchanged — same hue, same saturation
-- Keep gloss and metallic finish intact
-
-═══ WHAT NEVER CHANGES ═══
-❌ Crop and zoom — locked
-❌ Paint color — unchanged, fully saturated
-❌ Component geometry — unchanged
-❌ Badges, markings, wear — unchanged
-❌ Camera angle — locked
-
-OUTPUT: Aspect ratio 4:3
-${branding?.isEnabled ? "BRANDING: Logo (Image 3) top-left, small." : ""}`;
-
-  const parts: any[] = [
-    { text: prompt },
-    { text: "Image 1 — CLOSE-UP SUBJECT (preserve exact crop and zoom):" },
-    { inlineData: { data: cleanCar, mimeType: "image/png" } },
-    { text: "Image 2 — STUDIO BACKGROUND environment:" },
-    { inlineData: { data: cleanStudio, mimeType: "image/jpeg" } },
-  ];
-
-  if (branding?.isEnabled && branding?.logoUrl) {
-    parts.push(
-      { text: "Image 3 — BRANDING LOGO:" },
-      { inlineData: { data: stripDataPrefix(branding.logoUrl), mimeType: "image/png" } }
-    );
-  }
-
-  const model = ai.getGenerativeModel({
-    model: MODEL_IMAGE,
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-    ],
-    generationConfig: {
-      temperature: 0.01,
-      topP: 0.05,
-      topK: 2,
-      candidateCount: 1,
-    },
-  });
-
-  const response = await withRetry(
-    () => model.generateContent({ contents: [{ role: "user", parts }] }),
-    "refineDetailExterior"
-  );
-
-  const candidate = response.response.candidates?.[0];
-  const imagePart = candidate?.content?.parts?.find((p: any) => p.inlineData);
-
-  if (!imagePart?.inlineData?.data) {
-    throw new Error(`Detail exterior generation failed. FinishReason: ${candidate?.finishReason}`);
-  }
-
-  return `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
-}
-
-// -----------------------------------------------------------
-// DETAIL INTERIOR REFINEMENT (Dev B — 2-step pipeline)
-// Step 1: Generate with INTERIOR_DETAIL prompt
-// Step 2: Refine with studio refinement pass
-// Close-ups: steering wheel, gear shift, dashboard, seats etc.
-// -----------------------------------------------------------
-async function refineDetailInterior(
-  ai: GoogleGenerativeAI,
-  image: string,
-  studio: string,
-  branding?: { isEnabled?: boolean; logoUrl?: string | null },
-  studioHints?: { lightingProfile?: string; studioTone?: string; floorFinish?: string; exposureNote?: string; platformType?: string; name?: string }
-): Promise<string> {
-
-  const cleanOriginal = stripDataPrefix(image);
-  const cleanStudio = stripDataPrefix(studio);
-  const isDark = studioHints?.studioTone === "dark";
-
-  // Dynamic lighting based on studio hints (Dev B)
-  const detailLighting = isDark
-    ? "dark, moody studio lighting with refined highlights and atmospheric shadows"
-    : studioHints?.lightingProfile === "warm" ? "warm golden studio lighting with soft warm shadows"
-      : studioHints?.lightingProfile === "cool" ? "cool crisp white studio lighting with clean minimal shadows"
-        : "bright even neutral studio lighting with soft diffused shadows";
-
-  // Detect mime types
-  function detectMimeFromClean(cleanBase64: string): string {
-    try {
-      const header = atob(cleanBase64.slice(0, 16));
-      if (header.charCodeAt(0) === 0x89 && header.charCodeAt(1) === 0x50) return "image/png";
-    } catch { }
-    return "image/jpeg";
-  }
-
-  // ─────────────────────────────────────────────────
-  // STEP 1 — Generate with INTERIOR_DETAIL prompt
-  // ─────────────────────────────────────────────────
-  console.log(`🎯 [DETAIL-INT] Step 1/2: Generation (model: ${MODEL_IMAGE_INTERIOR})...`);
-
-  const prompt = [
-    `You are retouching Image 1. Output must match the exact viewpoint of Image 1.`,
-    `Image 2 is a studio reference — use it ONLY to determine the lighting tone to apply.`,
-    ``,
-    `Make ONLY these targeted changes to Image 1. Change nothing else:`,
-    ``,
-    `1. LIGHTING TONE ONLY: Apply ${detailLighting}. Remove outdoor sun patches, hard directional shadows, and overexposed hotspots. Adjust color temperature only — do not repaint or alter any surface.`,
-    ``,
-    `2. REFLECTION CLEANUP ONLY: Remove photographer, hand, or phone reflections from glass, screens, chrome, and glossy trim. Replace with clean neutral studio highlights. Preserve all gauge numbers, text, icons, and screen UI exactly.`,
-    ``,
-    `3. EXPOSURE RECOVERY ONLY: Recover detail in severely overexposed or underexposed zones only.`,
-    ``,
-    `4. WINDOWS (if visible): Replace any outdoor content through glass with a neutral studio blur or the studio from Image 2.`,
-    ``,
-    `DO NOT CHANGE UNDER ANY CIRCUMSTANCES:`,
-    `• Camera angle, zoom, crop, or framing — must be pixel-identical to Image 1`,
-    `• Any component geometry, position, shape, or size`,
-    `• Any material color or texture`,
-    `• Any text, numbers, icons, or markings`,
-    ``,
-    `Do not change the input aspect ratio.`,
-  ].join("\n");
-
-  const parts: any[] = [
-    { text: prompt },
-    { text: "Image 1 — the interior detail photo to edit. This is the MASTER reference. Every component stays identical: same geometry, materials, colors, textures, positions, zoom, and framing. You are making minimal edits only." },
-    { inlineData: { data: cleanOriginal, mimeType: detectMimeFromClean(cleanOriginal) } },
-    { text: "Image 2 — the studio reference. Use ONLY to determine the ambient light color temperature and tone. Do NOT use this to change any geometry or materials." },
-    { inlineData: { data: cleanStudio, mimeType: detectMimeFromClean(cleanStudio) } },
-  ];
-
-  const safetySettings = [
-    { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-    { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-    { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-    { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-  ];
-
-  const model = ai.getGenerativeModel({
-    model: MODEL_IMAGE_INTERIOR,
-    safetySettings,
-    generationConfig: {
-      temperature: 0.15,
-      topP: 0.3,
-      topK: 10,
-      candidateCount: 1,
-    },
-  });
-
-  let response: any;
-  let usedModel = MODEL_IMAGE_INTERIOR;
-  try {
-    response = await withRetry(
-      () => model.generateContent({ contents: [{ role: "user", parts }] }),
-      `refineDetailInterior-step1 (${MODEL_IMAGE_INTERIOR})`,
-      1  // Only 1 attempt on 3.1 — fail fast, fallback to stable model
-    );
-  } catch (primaryErr) {
-    // Fallback to stable model
-    console.warn(`⚠️ [DETAIL-INT] Primary model ${MODEL_IMAGE_INTERIOR} failed. Falling back to ${MODEL_IMAGE}...`);
-    usedModel = MODEL_IMAGE;
-    const fallbackModel = ai.getGenerativeModel({
-      model: MODEL_IMAGE,
-      safetySettings,
-      generationConfig: { temperature: 0.15, topP: 0.3, topK: 10, candidateCount: 1 },
-    });
-    response = await withRetry(
-      () => fallbackModel.generateContent({ contents: [{ role: "user", parts }] }),
-      `refineDetailInterior-step1-fallback (${MODEL_IMAGE})`
-    );
-  }
-
-  const candidate = response.response.candidates?.[0];
-  const imagePart = candidate?.content?.parts?.find((p: any) => p.inlineData);
-  console.log(`📊 [TOKENS] refineDetailInterior-step1 (${usedModel}) → in:${response.response.usageMetadata?.promptTokenCount} out:${response.response.usageMetadata?.candidatesTokenCount} total:${response.response.usageMetadata?.totalTokenCount}`);
-
-  if (!imagePart?.inlineData?.data) {
-    throw new Error(`Interior detail step 1 failed. FinishReason: ${candidate?.finishReason || "UNKNOWN"}`);
-  }
-
-  const step1Result = `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
-  console.log("✅ [DETAIL-INT] Step 1/2 complete");
-
-  // ─────────────────────────────────────────────────
-  // STEP 2 — Studio refinement pass
-  // ─────────────────────────────────────────────────
-  console.log(`🎯 [DETAIL-INT] Step 2/2: Studio refinement (model: ${MODEL_IMAGE_INTERIOR})...`);
-
-  const lightingFix = isDark
-    ? "The lighting must be dark and moody like this studio — remove all bright daylight from interior surfaces. Shadows should be deep and atmospheric."
-    : "The lighting must be bright and even like this studio — remove all harsh outdoor directional light from interior surfaces. Shadows should be soft and diffused.";
-
-  const refinementPrompt = [
-    "You are retouching Image 1. The camera angle, zoom, crop, and framing of Image 1 must remain IDENTICAL in the output.",
-    "Image 2 is a studio reference — use it only to determine what to show through windows and the lighting tone.",
-    `Make ONLY these targeted fixes to Image 1: (a) replace any remaining outdoor content through windows with the studio from Image 2; (b) ${lightingFix}; (c) remove any photographer or camera reflections from glass and screens — preserve all gauge numbers, icons, and screen text exactly.`,
-    "DO NOT change: camera angle, zoom, crop, framing, seat shapes, dashboard layout, material colors, material textures, or any component geometry.",
-    "Do not change the input aspect ratio.",
-  ].join(" ");
-
-  const cleanStep1 = stripDataPrefix(step1Result);
-  const refineParts: any[] = [
-    { text: refinementPrompt },
-    { text: "Image 1 — the car interior detail to retouch. This is the MASTER. All geometry, colors, materials, framing, zoom, and crop must be preserved exactly." },
-    { inlineData: { data: cleanStep1, mimeType: detectMimeFromClean(cleanStep1) } },
-    { text: "Image 2 — the studio reference. Use only for window content and lighting tone." },
-    { inlineData: { data: cleanStudio, mimeType: detectMimeFromClean(cleanStudio) } },
-  ];
-
-  const refineModel = ai.getGenerativeModel({
-    model: MODEL_IMAGE_INTERIOR,
-    safetySettings,
-    generationConfig: {
-      temperature: 0.1,
-      topP: 0.2,
-      topK: 10,
-      candidateCount: 1,
-    },
-  });
-
-  try {
-    const refineResponse: any = await withRetry(
-      () => refineModel.generateContent({ contents: [{ role: "user", parts: refineParts }] }),
-      `refineDetailInterior-step2 (${MODEL_IMAGE_INTERIOR})`
-    );
-
-    const refineCandidate = refineResponse.response.candidates?.[0];
-    const refineImagePart = refineCandidate?.content?.parts?.find((p: any) => p.inlineData);
-    console.log(`📊 [TOKENS] refineDetailInterior-step2 → in:${refineResponse.response.usageMetadata?.promptTokenCount} out:${refineResponse.response.usageMetadata?.candidatesTokenCount} total:${refineResponse.response.usageMetadata?.totalTokenCount}`);
-
-    if (refineImagePart?.inlineData?.data) {
-      console.log("✅ [DETAIL-INT] Step 2/2 complete");
-      return `data:${refineImagePart.inlineData.mimeType || "image/png"};base64,${refineImagePart.inlineData.data}`;
-    }
-
-    console.warn("⚠️ [DETAIL-INT] Step 2 returned no image — returning Step 1 result");
-    return step1Result;
-  } catch (step2Err) {
-    console.warn("⚠️ [DETAIL-INT] Step 2 failed after retries — returning Step 1 result");
-    return step1Result;
-  }
-}
-
-// -----------------------------------------------------------
-// DETAIL REFINEMENT
-// -----------------------------------------------------------
-async function refineDetail(
-  ai: GoogleGenerativeAI,
-  image: string,
-  studio: string,
-  branding?: { isEnabled?: boolean; logoUrl?: string | null }
-): Promise<string> {
-
-  const prompt = `You are an automotive detail photography specialist.
-
-YOUR ONLY JOB:
-Replace the background behind the car component with the studio environment from Image 2.
-The component itself must remain 100% identical — every detail, finish, and imperfection.
-
-KEEP UNCHANGED:
-- The component exactly as photographed
-- Existing lighting and shadows on the component
-- Camera angle and framing
-- Any damage, wear, or unique characteristics
-
-REPLACE:
-- Everything behind the component → studio background (Image 2)
-
-PROHIBITIONS:
-:x: Do not change the component in any way
-:x: Do not alter camera angle
-:x: Do not repair or clean damage
-
-OUTPUT: Aspect ratio 4:3
-${branding?.isEnabled ? "\nBRANDING: Logo (Image 3) top-left corner, small." : ""}`;
-
-  return generateImage(ai, image, studio, branding, prompt);
-}
-
-// -----------------------------------------------------------
-// CORE IMAGE GENERATOR
-// BUG FIX: removed the duplicate studio image push that was
-// causing the model to receive the background image twice.
-// -----------------------------------------------------------
-async function generateImage(
-  ai: GoogleGenerativeAI,
-  carImage: string,
-  studioBackground: string | null,
-  branding: { isEnabled?: boolean; logoUrl?: string | null } | undefined,
-  promptText: string,
-  isDetailShot: boolean = false
-): Promise<string> {
-
-  const cleanCar = stripDataPrefix(carImage);
-
-  // Build parts array — ORDER MATTERS for Gemini
-  // Pattern: text instruction → labeled car → labeled background → optional logo
-  const parts: any[] = [
-    { text: promptText },
-    { text: "Image 1 — PRIMARY SUBJECT (car, preserve geometry exactly):" },
-    { inlineData: { data: cleanCar, mimeType: detectMimeType(carImage) } },
-  ];
-
-  // FIX: studio image pushed ONCE only (previous code pushed it twice)
-  if (studioBackground) {
-    const cleanStudio = stripDataPrefix(studioBackground);
-    if (cleanStudio) {
-      parts.push(
-        { text: "Image 2 — STUDIO BACKGROUND environment:" },
-        { inlineData: { data: cleanStudio, mimeType: detectMimeType(studioBackground!) } }
-      );
-    }
-  }
-
-  // Optional branding logo
-  if (branding?.isEnabled && branding?.logoUrl) {
-    const cleanLogo = stripDataPrefix(branding.logoUrl);
-    parts.push(
-      { text: "Image 3 — BRANDING LOGO (place top-left corner, small):" },
-      { inlineData: { data: cleanLogo, mimeType: "image/png" } }
-    );
-  }
-
-  console.log(`🖼️ [GENERATE] Generating with ${MODEL_IMAGE} (${parts.length} parts)...`);
-
-  const model = ai.getGenerativeModel({
-    model: MODEL_IMAGE,
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-    ],
-    generationConfig: isDetailShot ? {
-      temperature: 0.05,
-      topP: 0.1,
-      topK: 1,
-      candidateCount: 1,
-    } : {
-      temperature: 0.01,
-      topP: 0.05,
-      topK: 2,
-      candidateCount: 1,
-    },
-  });
-
-  try {
-    const response = await model.generateContent({
-      contents: [{ role: "user", parts }],
-    });
-
-    const candidate = response.response.candidates?.[0];
-    const imagePart = candidate?.content?.parts?.find((p: any) => p.inlineData);
-    console.log(`📊 [TOKENS] generateImage → in:${response.response.usageMetadata?.promptTokenCount} out:${response.response.usageMetadata?.candidatesTokenCount} total:${response.response.usageMetadata?.totalTokenCount}`);
-
-    if (!imagePart?.inlineData?.data) {
-      const reason = candidate?.finishReason || "UNKNOWN";
-      console.error("❌ [GENERATE] Full response:", JSON.stringify(response, null, 2));
-      throw new Error(`Image generation failed. Model: ${MODEL_IMAGE}. FinishReason: ${reason}`);
-    }
-
-    const mimeType = imagePart.inlineData.mimeType || "image/png";
-    return `data:${mimeType};base64,${imagePart.inlineData.data}`;
-
-  } catch (err) {
-    console.error("❌ [GENERATE] Error:", err);
-    throw err;
-  }
-}
-
-// -----------------------------------------------------------
-// UTILITY
-// -----------------------------------------------------------
-function stripDataPrefix(base64: string): string {
-  return base64.includes(",") ? base64.split(",")[1] : base64;
-}
-
-function detectMimeType(base64: string): string {
-  if (base64.startsWith("data:")) {
-    const match = base64.match(/^data:([^;]+);/);
-    if (match) return match[1];
-  }
-  // Detect from magic bytes
-  try {
-    const first4 = atob(base64.slice(0, 8));
-    if (first4.charCodeAt(0) === 0xFF && first4.charCodeAt(1) === 0xD8) return "image/jpeg";
-    if (first4.charCodeAt(0) === 0x89 && first4.charCodeAt(1) === 0x50) return "image/png";
-  } catch { }
-  return "image/png";
-}
